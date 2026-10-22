@@ -20,23 +20,6 @@
   color-scheme: light;
 }
 
-.dark {
-  --bg: 9 9 11;
-  --surface: 17 17 20;
-  --subtle: 28 28 32;
-  --line: 39 39 45;
-  --fg: 244 244 245;
-  --muted: 140 140 150;
-  --accent: 129 140 248;
-  --ok: 52 211 153;
-  --warn: 251 191 36;
-  --danger: 248 113 113;
-  --c-simples: #818cf8;
-  --c-presumido: #fbbf24;
-  --c-real: #34d399;
-  --grid: 39 39 45;
-  color-scheme: dark;
-}
 
 @layer base {
   html,
@@ -68,6 +51,13 @@
       linear-gradient(rgb(var(--grid) / 0.6) 1px, transparent 1px),
       linear-gradient(90deg, rgb(var(--grid) / 0.6) 1px, transparent 1px);
     background-size: 28px 28px;
+  }
+  .scroll-navy::-webkit-scrollbar {
+    width: 6px;
+  }
+  .scroll-navy::-webkit-scrollbar-thumb {
+    background: rgb(255 255 255 / 0.12);
+    border-radius: 999px;
   }
   .scroll-thin::-webkit-scrollbar {
     width: 6px;

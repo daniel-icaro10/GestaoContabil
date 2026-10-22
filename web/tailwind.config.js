@@ -1,7 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
-  darkMode: 'class',
   theme: {
     extend: {
       fontFamily: {
@@ -19,6 +18,11 @@ export default {
         ok: 'rgb(var(--ok) / <alpha-value>)',
         warn: 'rgb(var(--warn) / <alpha-value>)',
         danger: 'rgb(var(--danger) / <alpha-value>)',
+        // Barra lateral — azul-marinho escuro
+        navy: {
+          DEFAULT: '#0A1A3A',
+          light: '#93C5FD',
+        },
       },
       keyframes: {
         enter: { from: { opacity: '0', transform: 'translateY(4px)' }, to: { opacity: '1', transform: 'none' } },

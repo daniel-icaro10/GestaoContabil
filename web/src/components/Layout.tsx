@@ -13,14 +13,12 @@ import {
   Loader2,
   LogOut,
   Menu,
-  Moon,
   Package,
   Plug,
   Receipt,
   Search,
   ShieldCheck,
   SlidersHorizontal,
-  Sun,
   User,
   Users,
   X,
@@ -49,19 +47,6 @@ const ROUTE_TITLES: Record<string, string> = {
   ...Object.fromEntries(ADMIN_LINKS.map((l) => [l.to, l.label])),
 };
 
-function useTheme() {
-  const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark);
-    try {
-      localStorage.setItem('theme', dark ? 'dark' : 'light');
-    } catch {
-      /* ignore */
-    }
-  }, [dark]);
-  return [dark, setDark] as const;
-}
-
 function useClickOutside(open: boolean, close: () => void) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -82,14 +67,14 @@ function NavItem({ to, icon: Icon, label, end, onClick }: { to: string; icon: an
       className={({ isActive }) =>
         clsx(
           'group relative flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] transition-colors',
-          isActive ? 'bg-subtle font-medium text-fg' : 'text-muted hover:bg-subtle/60 hover:text-fg',
+          isActive ? 'bg-white/10 font-medium text-white' : 'text-white/60 hover:bg-white/[0.06] hover:text-white',
         )
       }
     >
       {({ isActive }) => (
         <>
-          {isActive && <span className="absolute -left-3 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-accent" />}
-          <Icon size={15} className={clsx(isActive ? 'text-accent' : 'text-muted group-hover:text-fg')} />
+          {isActive && <span className="absolute -left-3 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-navy-light" />}
+          <Icon size={15} className={clsx(isActive ? 'text-navy-light' : 'text-white/45 group-hover:text-white')} />
           <span className="truncate">{label}</span>
         </>
       )}
@@ -111,27 +96,27 @@ function Sidebar({ open, onClose }: { open: boolean; onClose(): void }) {
       />
       <aside
         className={clsx(
-          'no-print fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r border-line bg-surface transition-transform lg:translate-x-0',
+          'no-print fixed inset-y-0 left-0 z-40 flex w-60 flex-col bg-navy text-white transition-transform lg:translate-x-0',
           open ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        <div className="flex h-14 items-center gap-2.5 border-b border-line px-5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-fg text-bg">
+        <div className="flex h-14 items-center gap-2.5 border-b border-white/10 px-5">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white text-navy">
             <ShieldCheck size={15} />
           </div>
           <div className="leading-tight">
-            <p className="text-[13px] font-semibold tracking-tight">Diagnóstico</p>
-            <p className="label-xs !text-[9px]">Tributário Empresarial</p>
+            <p className="text-[13px] font-semibold tracking-tight text-white">Diagnóstico</p>
+            <p className="label-xs !text-[9px] !text-white/45">Tributário Empresarial</p>
           </div>
-          <button className="ml-auto rounded p-1 text-muted lg:hidden" onClick={onClose} aria-label="Fechar menu">
+          <button className="ml-auto rounded p-1 text-white/60 hover:text-white lg:hidden" onClick={onClose} aria-label="Fechar menu">
             <X size={16} />
           </button>
         </div>
-        <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4 scroll-thin">
+        <nav className="scroll-navy flex-1 space-y-5 overflow-y-auto px-3 py-4">
           {!locked &&
             groups.map(({ group, items }) => (
               <div key={group}>
-                <p className="label-xs mb-1.5 px-2.5">{group}</p>
+                <p className="label-xs mb-1.5 px-2.5 !text-white/35">{group}</p>
                 <div className="space-y-px">
                   {items.map((p) => (
                     <NavItem key={p.id} to={`/${p.id}`} icon={p.icon} label={p.label} onClick={onClose} />
@@ -140,7 +125,7 @@ function Sidebar({ open, onClose }: { open: boolean; onClose(): void }) {
               </div>
             ))}
           <div>
-            <p className="label-xs mb-1.5 px-2.5">Conta</p>
+            <p className="label-xs mb-1.5 px-2.5 !text-white/35">Conta</p>
             <div className="space-y-px">
               {!isAdmin && <NavItem to="/assinatura" icon={CircleDollarSign} label="Assinatura" onClick={onClose} />}
               <NavItem to="/perfil" icon={User} label="Meu Perfil" onClick={onClose} />
@@ -148,7 +133,7 @@ function Sidebar({ open, onClose }: { open: boolean; onClose(): void }) {
           </div>
           {isAdmin && (
             <div>
-              <p className="label-xs mb-1.5 px-2.5">Administração</p>
+              <p className="label-xs mb-1.5 px-2.5 !text-white/35">Administração</p>
               <div className="space-y-px">
                 {ADMIN_LINKS.map((l) => (
                   <NavItem key={l.to} {...l} onClick={onClose} />
@@ -157,8 +142,8 @@ function Sidebar({ open, onClose }: { open: boolean; onClose(): void }) {
             </div>
           )}
         </nav>
-        <div className="border-t border-line px-5 py-3">
-          <p className="num text-[10px] text-muted">v3.0 · {new Date().getFullYear()}</p>
+        <div className="border-t border-white/10 px-5 py-3">
+          <p className="num text-[10px] text-white/35">v3.0 · {new Date().getFullYear()}</p>
         </div>
       </aside>
     </>
@@ -355,7 +340,6 @@ function MenuBtn({ icon, children, onClick }: { icon: ReactNode; children: React
 }
 
 export function Layout({ children, showCompany }: { children: ReactNode; showCompany: boolean }) {
-  const [dark, setDark] = useTheme();
   const [menu, setMenu] = useState(false);
   const { pathname } = useLocation();
   const { current } = useApp();
@@ -383,13 +367,6 @@ export function Layout({ children, showCompany }: { children: ReactNode; showCom
         )}
         <div className="ml-auto flex items-center gap-1">
           {showCompany && <SaveIndicator />}
-          <button
-            onClick={() => setDark((d) => !d)}
-            className="rounded-lg p-2 text-muted transition hover:bg-subtle hover:text-fg"
-            aria-label="Alternar tema"
-          >
-            {dark ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
           <Notifications />
           <UserMenu />
         </div>
