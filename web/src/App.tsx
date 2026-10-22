@@ -99,6 +99,7 @@ function Shell() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/cadastro" element={<Login />} />
+        <Route path="/setup" element={<Login />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     );
@@ -122,6 +123,7 @@ function Shell() {
         <Route path="/admin/sistema" element={<AdminOnly><Sistema /></AdminOnly>} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/cadastro" element={<Navigate to="/" replace />} />
+        <Route path="/setup" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

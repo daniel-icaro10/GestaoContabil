@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, BarChart3, ShieldCheck, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../lib/api';
@@ -7,24 +7,35 @@ import { maskCpfCnpj } from '../lib/format';
 import { Alert, Button, Field, Input } from '../components/ui';
 
 export default function Login() {
-  const { login, register } = useAuth();
+  const { login, register, setup } = useAuth();
   const { pathname } = useLocation();
-  const isSignup = pathname === '/cadastro';
+  const navigate = useNavigate();
   const [allowSignup, setAllowSignup] = useState(true);
-  const [form, setForm] = useState({ name: '', email: '', password: '', document: '' });
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const isSetup = needsSetup;
+  const isSignup = !isSetup && pathname === '/cadastro';
+  const [form, setForm] = useState({ name: '', email: '', password: '', document: '', code: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api<{ allowSignup: boolean }>('/auth/config').then((c) => setAllowSignup(c.allowSignup)).catch(() => undefined);
-  }, []);
+    api<{ allowSignup: boolean; needsSetup: boolean }>('/auth/config')
+      .then((c) => {
+        setAllowSignup(c.allowSignup);
+        setNeedsSetup(c.needsSetup);
+        if (c.needsSetup && pathname !== '/setup') navigate('/setup', { replace: true });
+        if (!c.needsSetup && pathname === '/setup') navigate('/login', { replace: true });
+      })
+      .catch(() => undefined);
+  }, [pathname, navigate]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     setBusy(true);
     try {
-      if (isSignup) await register({ ...form, document: form.document.replace(/\D/g, '') || undefined });
+      if (isSetup) await setup({ code: form.code, name: form.name, email: form.email, password: form.password });
+      else if (isSignup) await register({ ...form, document: form.document.replace(/\D/g, '') || undefined });
       else await login(form.email, form.password);
     } catch (err: any) {
       setError(err.message);
@@ -79,12 +90,39 @@ export default function Login() {
               <ShieldCheck size={17} />
             </div>
           </div>
-          <h2 className="text-2xl font-semibold tracking-tight">{isSignup ? 'Criar conta' : 'Entrar'}</h2>
+          <h2 className="text-2xl font-semibold tracking-tight">
+            {isSetup ? 'Configuração inicial' : isSignup ? 'Criar conta' : 'Entrar'}
+          </h2>
           <p className="mt-1 text-sm text-muted">
-            {isSignup ? 'Preencha seus dados para começar.' : 'Acesse sua conta para continuar.'}
+            {isSetup
+              ? 'Crie a conta do administrador do sistema.'
+              : isSignup
+                ? 'Preencha seus dados para começar.'
+                : 'Acesse sua conta para continuar.'}
           </p>
 
           <div className="mt-8 space-y-4">
+            {isSetup && (
+              <>
+                <Alert tone="accent">
+                  O código de configuração aparece nos <strong>logs do servidor</strong> (no Render: serviço › Logs). Ele vale
+                  para um único uso.
+                </Alert>
+                <Field label="Código de configuração">
+                  <Input
+                    required
+                    className="num uppercase tracking-widest"
+                    placeholder="XXXX-XXXX-XXXX"
+                    value={form.code}
+                    onChange={set('code')}
+                    autoComplete="off"
+                  />
+                </Field>
+                <Field label="Nome do administrador">
+                  <Input required value={form.name} onChange={set('name')} autoComplete="name" />
+                </Field>
+              </>
+            )}
             {isSignup && (
               <>
                 <Field label="Nome completo">
@@ -102,19 +140,19 @@ export default function Login() {
               <Input
                 required
                 type="password"
-                minLength={isSignup ? 6 : undefined}
+                minLength={isSetup ? 8 : isSignup ? 6 : undefined}
                 value={form.password}
                 onChange={set('password')}
-                autoComplete={isSignup ? 'new-password' : 'current-password'}
+                autoComplete={isSignup || isSetup ? 'new-password' : 'current-password'}
               />
             </Field>
             {error && <Alert tone="danger">{error}</Alert>}
             <Button type="submit" className="w-full" loading={busy} icon={!busy && <ArrowRight size={14} />}>
-              {isSignup ? 'Criar conta' : 'Entrar'}
+              {isSetup ? 'Criar administrador' : isSignup ? 'Criar conta' : 'Entrar'}
             </Button>
           </div>
 
-          {allowSignup && (
+          {allowSignup && !isSetup && (
             <p className="mt-6 text-center text-sm text-muted">
               {isSignup ? 'Já tem conta? ' : 'Ainda não tem conta? '}
               <Link to={isSignup ? '/login' : '/cadastro'} className="font-medium text-fg underline-offset-4 hover:underline">

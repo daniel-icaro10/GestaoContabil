@@ -33,6 +33,7 @@ interface AuthCtx {
   loading: boolean;
   login(email: string, password: string): Promise<void>;
   register(data: { name: string; email: string; password: string; document?: string }): Promise<void>;
+  setup(data: { code: string; name: string; email: string; password: string }): Promise<void>;
   logout(): void;
   refresh(): Promise<void>;
   setSession(s: Session): void;
@@ -88,6 +89,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession({ user: r.user, access: r.access });
   }, []);
 
+  const setup = useCallback(async (data: { code: string; name: string; email: string; password: string }) => {
+    const r = await api<Session & { token: string }>('/auth/setup', { body: data });
+    setToken(r.token);
+    setSession({ user: r.user, access: r.access });
+  }, []);
+
   const logout = useCallback(() => {
     setToken(null);
     setSession(null);
@@ -99,13 +106,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       login,
       register,
+      setup,
       logout,
       refresh,
       setSession,
       isAdmin: session?.user.role === 'admin',
       can: (page) => Boolean(session && (session.user.role === 'admin' || session.user.permissions.includes(page))),
     }),
-    [session, loading, login, register, logout, refresh],
+    [session, loading, login, register, setup, logout, refresh],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

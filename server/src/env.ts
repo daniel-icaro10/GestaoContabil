@@ -30,7 +30,5 @@ export const env = {
   appSecret: loadSecret(),
   // No Render, RENDER_EXTERNAL_URL já traz a URL HTTPS pública do serviço.
   publicUrl: (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, ''),
-  adminEmail: process.env.ADMIN_EMAIL ?? 'admin@admin.com',
-  adminPassword: process.env.ADMIN_PASSWORD ?? 'admin123',
   webDist: path.resolve(process.cwd(), '../web/dist'),
 };

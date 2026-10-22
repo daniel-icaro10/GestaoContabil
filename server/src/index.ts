@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import cors from 'cors';
-import bcrypt from 'bcryptjs';
 import { ZodError } from 'zod';
 import { env } from './env.js';
 import { get, initDb, run } from './db.js';
@@ -11,22 +10,15 @@ import { appRouter } from './routes/app.js';
 import { adminRouter } from './routes/admin.js';
 import { CoraError } from './cora.js';
 import { handleWebhook, runBillingJobs } from './billing.js';
-import { PAGES, getCoraConfig } from './settings.js';
+import { getCoraConfig } from './settings.js';
+import { issueSetupCode, needsSetup } from './setup.js';
 
 await initDb();
 
-// Seed: administrador inicial e planos de exemplo.
-if (!get(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`)) {
-  run('INSERT INTO users (name, email, password_hash, role, permissions) VALUES (?, ?, ?, ?, ?)', [
-    'Administrador',
-    env.adminEmail.toLowerCase(),
-    bcrypt.hashSync(env.adminPassword, 10),
-    'admin',
-    JSON.stringify(PAGES),
-  ]);
-  const pwd = process.env.ADMIN_PASSWORD ? '(senha definida em ADMIN_PASSWORD)' : env.adminPassword;
-  console.log(`[setup] Administrador criado: ${env.adminEmail} / ${pwd} — altere a senha após o primeiro acesso.`);
-}
+// Primeiro acesso: o administrador é criado pela tela /setup (código exibido no log).
+if (needsSetup()) issueSetupCode();
+
+// Planos de exemplo.
 if (!get('SELECT id FROM plans LIMIT 1')) {
   run('INSERT INTO plans (name, description, price_cents, interval_months) VALUES (?, ?, ?, ?)', [
     'Mensal',

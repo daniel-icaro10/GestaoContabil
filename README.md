@@ -24,8 +24,7 @@ npm run build
 npm start                  # http://localhost:3333
 ```
 
-No primeiro start é criado o administrador `admin@admin.com` / `admin123` (configurável via `ADMIN_EMAIL` /
-`ADMIN_PASSWORD`). **Troque a senha em Meu Perfil.** Copie `server/.env.example` para `server/.env` para configurar.
+**Primeiro acesso:** nenhum administrador vem pré-cadastrado. Ao iniciar, o servidor imprime no log um **código de configuração** de uso único. Abra o sistema, você será levado à tela `/setup`, informe o código e crie a conta de administrador (e-mail e senha escolhidos por você). Depois disso a tela de setup é desativada. Copie `server/.env.example` para `server/.env` para configurar.
 
 Os dados ficam em `server/data/app.sqlite`. Faça backup dessa pasta e do arquivo `data/.secret` (ou defina `APP_SECRET`).
 Sem o segredo, as credenciais da Cora não podem ser descriptografadas.
@@ -63,9 +62,8 @@ variáveis de ambiente.
 
 1. Envie este repositório para o GitHub.
 2. No Render: **New › Blueprint**, selecione o repositório e confirme.
-3. Preencha `ADMIN_EMAIL` e `ADMIN_PASSWORD` (credenciais do primeiro administrador). O `APP_SECRET` é gerado
-   automaticamente.
-4. Após o deploy, acesse a URL `https://<servico>.onrender.com`, entre como admin e configure a Cora. A URL do webhook já
+3. Nenhuma credencial é configurada no Render. O `APP_SECRET` é gerado automaticamente.
+4. Após o deploy, abra **Logs** do serviço e copie o código de configuração. Acesse `https://<servico>.onrender.com`, informe o código na tela de configuração inicial e crie seu administrador. Em seguida configure a Cora. A URL do webhook já
    usa o endereço público do Render (`RENDER_EXTERNAL_URL`).
 
 > O plano **Starter** é necessário por causa do disco persistente. No plano Free o sistema de arquivos é apagado a cada
