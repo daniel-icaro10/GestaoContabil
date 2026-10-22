@@ -188,7 +188,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (currentId === id) setCurrentId(rest[0].id);
       },
       async saveTaxConfig(cfg) {
-        await api('/tax-config', { method: 'PUT', body: cfg });
+        if (cfg) await api('/tax-config', { method: 'PUT', body: cfg });
+        else await api('/tax-config', { method: 'DELETE' });
         setTaxConfig(mergeTaxConfig(cfg));
       },
       reload,

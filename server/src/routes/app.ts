@@ -180,9 +180,15 @@ appRouter.get('/tax-config', requireAuth, requireSubscription, (req, res) => {
 });
 
 appRouter.put('/tax-config', requireAuth, requireSubscription, (req, res) => {
-  const body = z.record(z.string(), z.any()).nullable().parse(req.body);
-  run('UPDATE users SET tax_config = ? WHERE id = ?', [body ? JSON.stringify(body) : null, req.user!.id]);
+  const body = z.record(z.string(), z.any()).parse(req.body);
+  run('UPDATE users SET tax_config = ? WHERE id = ?', [JSON.stringify(body), req.user!.id]);
   res.json(body);
+});
+
+// Restaura os parâmetros padrão.
+appRouter.delete('/tax-config', requireAuth, requireSubscription, (req, res) => {
+  run('UPDATE users SET tax_config = NULL WHERE id = ?', [req.user!.id]);
+  res.status(204).end();
 });
 
 // ---------------- Assinatura ----------------
