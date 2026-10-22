@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 250 250 250;
+  --surface: 255 255 255;
+  --subtle: 244 244 245;
+  --line: 228 228 231;
+  --fg: 24 24 27;
+  --muted: 113 113 122;
+  --accent: 79 70 229;
+  --ok: 5 150 105;
+  --warn: 217 119 6;
+  --danger: 220 38 38;
+  --c-simples: #4f46e5;
+  --c-presumido: #f59e0b;
+  --c-real: #10b981;
+  --grid: 228 228 231;
+  color-scheme: light;
+}
+
+.dark {
+  --bg: 9 9 11;
+  --surface: 17 17 20;
+  --subtle: 28 28 32;
+  --line: 39 39 45;
+  --fg: 244 244 245;
+  --muted: 140 140 150;
+  --accent: 129 140 248;
+  --ok: 52 211 153;
+  --warn: 251 191 36;
+  --danger: 248 113 113;
+  --c-simples: #818cf8;
+  --c-presumido: #fbbf24;
+  --c-real: #34d399;
+  --grid: 39 39 45;
+  color-scheme: dark;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  ::selection {
+    background: rgb(var(--accent) / 0.2);
+  }
+}
+
+@layer components {
+  .num {
+    @apply font-mono tabular-nums tracking-tight;
+  }
+  .label-xs {
+    @apply font-mono text-[10px] uppercase tracking-[0.14em] text-muted;
+  }
+  .input {
+    @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg outline-none transition placeholder:text-muted/60 focus:border-accent focus:ring-2 focus:ring-accent/15 disabled:opacity-60;
+  }
+  .bg-grid {
+    background-image:
+      linear-gradient(rgb(var(--grid) / 0.6) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--grid) / 0.6) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  .scroll-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background: rgb(var(--line));
+    border-radius: 999px;
+  }
+  .table-clean {
+    @apply w-full text-sm;
+  }
+  .table-clean th {
+    @apply label-xs whitespace-nowrap border-b border-line px-4 py-2.5 text-left font-medium;
+  }
+  .table-clean td {
+    @apply border-b border-line/70 px-4 py-2.5;
+  }
+  .table-clean tbody tr:last-child td {
+    @apply border-b-0;
+  }
+  .table-clean tbody tr {
+    @apply transition-colors hover:bg-subtle/60;
+  }
+}
+
+input[type='range'] {
+  accent-color: rgb(var(--accent));
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white !important;
+  }
+  .print-area {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+}
