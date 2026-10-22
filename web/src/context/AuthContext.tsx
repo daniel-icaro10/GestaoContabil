@@ -33,7 +33,7 @@ interface AuthCtx {
   loading: boolean;
   login(email: string, password: string): Promise<void>;
   register(data: { name: string; email: string; password: string; document?: string }): Promise<void>;
-  setup(data: { code: string; name: string; email: string; password: string }): Promise<void>;
+  setup(data: { name: string; email: string; password: string }): Promise<void>;
   logout(): void;
   refresh(): Promise<void>;
   setSession(s: Session): void;
@@ -89,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession({ user: r.user, access: r.access });
   }, []);
 
-  const setup = useCallback(async (data: { code: string; name: string; email: string; password: string }) => {
+  const setup = useCallback(async (data: { name: string; email: string; password: string }) => {
     const r = await api<Session & { token: string }>('/auth/setup', { body: data });
     setToken(r.token);
     setSession({ user: r.user, access: r.access });

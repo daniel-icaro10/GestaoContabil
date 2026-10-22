@@ -11,7 +11,7 @@ import {
   type UserRow,
 } from '../auth.js';
 import { PAGES, getSettings, isCoraConfigured } from '../settings.js';
-import { checkSetupCode, finishSetup, needsSetup } from '../setup.js';
+import { needsSetup } from '../setup.js';
 import {
   cancelInvoice,
   getSubscription,
@@ -54,13 +54,12 @@ appRouter.get('/auth/config', (_req, res) => {
   res.json({ allowSignup: getSettings().allowSignup, needsSetup: needsSetup() });
 });
 
-// Configuração inicial: cria o primeiro administrador (exige o código exibido no log do servidor).
+// Configuração inicial: cria o primeiro administrador. Disponível apenas enquanto não houver admin.
 appRouter.post('/auth/setup', (req, res) => {
   if (!needsSetup()) throw new HttpError(409, 'O sistema já foi configurado.');
   const body = z
-    .object({ code: z.string().trim().min(1, 'Informe o código de configuração'), name: z.string().trim().min(2, 'Informe seu nome'), email, password: z.string().min(8, 'A senha do administrador deve ter ao menos 8 caracteres') })
+    .object({ name: z.string().trim().min(2, 'Informe seu nome'), email, password: z.string().min(8, 'A senha do administrador deve ter ao menos 8 caracteres') })
     .parse(req.body);
-  if (!checkSetupCode(body.code)) throw new HttpError(403, 'Código de configuração inválido. Confira nos logs do servidor.');
   const { lastId } = run('INSERT INTO users (name, email, password_hash, role, permissions) VALUES (?, ?, ?, ?, ?)', [
     body.name,
     body.email,
@@ -68,7 +67,6 @@ appRouter.post('/auth/setup', (req, res) => {
     'admin',
     JSON.stringify(PAGES),
   ]);
-  finishSetup();
   console.log(`[setup] Administrador criado: ${body.email}`);
   const user = get<UserRow>('SELECT * FROM users WHERE id = ?', [lastId])!;
   res.status(201).json({ token: signToken(user), ...sessionPayload(user) });

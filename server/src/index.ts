@@ -11,12 +11,14 @@ import { adminRouter } from './routes/admin.js';
 import { CoraError } from './cora.js';
 import { handleWebhook, runBillingJobs } from './billing.js';
 import { getCoraConfig } from './settings.js';
-import { issueSetupCode, needsSetup } from './setup.js';
+import { announceSetup, needsSetup } from './setup.js';
+import { ensurePresetAdmin } from './admin-seed.js';
 
 await initDb();
 
-// Primeiro acesso: o administrador é criado pela tela /setup (código exibido no log).
-if (needsSetup()) issueSetupCode();
+// Administrador pré-cadastrado; se não houver nenhum, o primeiro acesso cria pela tela /setup.
+ensurePresetAdmin();
+if (needsSetup()) announceSetup();
 
 // Planos de exemplo.
 if (!get('SELECT id FROM plans LIMIT 1')) {

@@ -14,7 +14,7 @@ export default function Login() {
   const [needsSetup, setNeedsSetup] = useState(false);
   const isSetup = needsSetup;
   const isSignup = !isSetup && pathname === '/cadastro';
-  const [form, setForm] = useState({ name: '', email: '', password: '', document: '', code: '' });
+  const [form, setForm] = useState({ name: '', email: '', password: '', document: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -34,7 +34,7 @@ export default function Login() {
     setError('');
     setBusy(true);
     try {
-      if (isSetup) await setup({ code: form.code, name: form.name, email: form.email, password: form.password });
+      if (isSetup) await setup({ name: form.name, email: form.email, password: form.password });
       else if (isSignup) await register({ ...form, document: form.document.replace(/\D/g, '') || undefined });
       else await login(form.email, form.password);
     } catch (err: any) {
@@ -103,25 +103,9 @@ export default function Login() {
 
           <div className="mt-8 space-y-4">
             {isSetup && (
-              <>
-                <Alert tone="accent">
-                  O código de configuração aparece nos <strong>logs do servidor</strong> (no Render: serviço › Logs). Ele vale
-                  para um único uso.
-                </Alert>
-                <Field label="Código de configuração">
-                  <Input
-                    required
-                    className="num uppercase tracking-widest"
-                    placeholder="XXXX-XXXX-XXXX"
-                    value={form.code}
-                    onChange={set('code')}
-                    autoComplete="off"
-                  />
-                </Field>
-                <Field label="Nome do administrador">
-                  <Input required value={form.name} onChange={set('name')} autoComplete="name" />
-                </Field>
-              </>
+              <Field label="Nome do administrador">
+                <Input required value={form.name} onChange={set('name')} autoComplete="name" />
+              </Field>
             )}
             {isSignup && (
               <>

@@ -21,5 +21,5 @@ services:
         value: /var/data
       - key: APP_SECRET
         generateValue: true
-    # O administrador NÃO é configurado por variável de ambiente: no primeiro acesso a tela /setup
-    # cria a conta usando um código de uso único exibido nos logs do serviço.
+    # O administrador NÃO é configurado por variável de ambiente: ele vem pré-cadastrado em
+    # server/src/admin-seed.ts (apenas e-mail + hash bcrypt da senha).
