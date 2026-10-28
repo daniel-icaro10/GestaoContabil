@@ -3,7 +3,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { all, get, run } from '../db.js';
-import { HttpError, publicUser, requireAdmin, requireAuth, type UserRow } from '../auth.js';
+import { HttpError, grantedModules, publicUser, requireAdmin, requireAuth, type UserRow } from '../auth.js';
 import {
   MODULE_IDS,
   getCoraConfig,
@@ -19,6 +19,7 @@ import {
   cancelInvoice,
   getSubscription,
   issueInvoice,
+  planModules,
   subscriptionState,
   syncInvoice,
   runBillingJobs,
@@ -78,6 +79,8 @@ function adminUserView(u: UserRow) {
   const companies = get<{ n: number }>('SELECT COUNT(*) n FROM companies WHERE user_id = ?', [u.id])!.n;
   return {
     ...publicUser(u),
+    // `modules` (de publicUser) são os efetivos; estes são só os liberados manualmente.
+    grantedModules: grantedModules(u),
     companies,
     subscription: sub
       ? { state: subscriptionState(sub), periodEnd: sub.current_period_end, planId: sub.plan_id, planName: plan?.name ?? null }
@@ -190,39 +193,43 @@ const planBody = z.object({
   price_cents: z.number().int().min(500, 'A Cora exige valor mínimo de R$ 5,00'),
   interval_months: z.number().int().min(1).max(36),
   active: z.boolean().default(true),
+  modules: moduleList.min(1, 'Selecione ao menos um módulo para o plano'),
 });
+
+const planView = (p: Plan) => ({ ...p, modules: planModules(p) });
 
 adminRouter.get('/plans', (_req, res) => {
   res.json(
-    all(
+    all<Plan>(
       `SELECT p.*, (SELECT COUNT(*) FROM subscriptions s WHERE s.plan_id = p.id AND s.current_period_end >= ?) AS subscribers
        FROM plans p ORDER BY p.price_cents`,
       [new Date().toISOString()],
-    ),
+    ).map(planView),
   );
 });
 
 adminRouter.post('/plans', (req, res) => {
   const b = planBody.parse(req.body);
   const { lastId } = run(
-    'INSERT INTO plans (name, description, price_cents, interval_months, active) VALUES (?, ?, ?, ?, ?)',
-    [b.name, b.description, b.price_cents, b.interval_months, b.active],
+    'INSERT INTO plans (name, description, price_cents, interval_months, active, modules) VALUES (?, ?, ?, ?, ?, ?)',
+    [b.name, b.description, b.price_cents, b.interval_months, b.active, JSON.stringify(b.modules)],
   );
-  res.status(201).json(get('SELECT * FROM plans WHERE id = ?', [lastId]));
+  res.status(201).json(planView(get<Plan>('SELECT * FROM plans WHERE id = ?', [lastId])!));
 });
 
 adminRouter.put('/plans/:id', (req, res) => {
   const id = Number(req.params.id);
   const b = planBody.parse(req.body);
-  run('UPDATE plans SET name = ?, description = ?, price_cents = ?, interval_months = ?, active = ? WHERE id = ?', [
+  run('UPDATE plans SET name = ?, description = ?, price_cents = ?, interval_months = ?, active = ?, modules = ? WHERE id = ?', [
     b.name,
     b.description,
     b.price_cents,
     b.interval_months,
     b.active,
+    JSON.stringify(b.modules),
     id,
   ]);
-  res.json(get('SELECT * FROM plans WHERE id = ?', [id]));
+  res.json(planView(get<Plan>('SELECT * FROM plans WHERE id = ?', [id])!));
 });
 
 adminRouter.delete('/plans/:id', (req, res) => {

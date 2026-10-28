@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { get } from './db.js';
 import { env } from './env.js';
-import { hasAccess } from './billing.js';
+import { hasAccess, subscriptionModules } from './billing.js';
 import { MODULE_IDS, modulePages, toModules, type ModuleId, type PageId } from './settings.js';
 
 export interface UserRow {
@@ -42,14 +42,20 @@ export function signToken(user: UserRow) {
   return jwt.sign({ sub: String(user.id) }, env.appSecret, { expiresIn: '7d' });
 }
 
-/** Módulos liberados para o usuário (a coluna `permissions` guarda os ids dos módulos). */
-export function userModules(user: UserRow): ModuleId[] {
-  if (user.role === 'admin') return [...MODULE_IDS];
+/** Módulos liberados manualmente pelo admin (a coluna `permissions` guarda os ids dos módulos). */
+export function grantedModules(user: UserRow): ModuleId[] {
   try {
     return toModules(JSON.parse(user.permissions));
   } catch {
     return [];
   }
+}
+
+/** Módulos efetivos: os liberados pelo admin mais os do plano da assinatura ativa. */
+export function userModules(user: UserRow): ModuleId[] {
+  if (user.role === 'admin') return [...MODULE_IDS];
+  const mine = [...grantedModules(user), ...subscriptionModules(user.id)];
+  return MODULE_IDS.filter((m) => mine.includes(m));
 }
 
 export function userPermissions(user: UserRow): PageId[] {

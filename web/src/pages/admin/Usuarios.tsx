@@ -13,7 +13,10 @@ interface AdminUser {
   email: string;
   role: 'admin' | 'user';
   active: boolean;
+  /** Módulos efetivos (liberados pelo admin + plano da assinatura). */
   modules: ModuleId[];
+  /** Módulos liberados manualmente pelo admin. */
+  grantedModules: ModuleId[];
   document: string;
   phone: string;
   companies: number;
@@ -35,7 +38,7 @@ const SUB_BADGE: Record<string, { label: string; tone: 'ok' | 'warn' | 'danger' 
   none: { label: 'Sem plano', tone: 'neutral' },
 };
 
-type FormState = Omit<AdminUser, 'id' | 'companies' | 'createdAt' | 'subscription'> & { id?: number; password: string };
+type FormState = Omit<AdminUser, 'id' | 'companies' | 'createdAt' | 'subscription' | 'grantedModules'> & { id?: number; password: string };
 
 const emptyForm = (modules: ModuleId[]): FormState => ({
   name: '',
@@ -190,7 +193,7 @@ export default function Usuarios() {
                         )}
                         <IconBtn
                           title="Editar"
-                          onClick={() => setForm({ ...u, document: maskCpfCnpj(u.document), password: '' })}
+                          onClick={() => setForm({ ...u, modules: u.grantedModules, document: maskCpfCnpj(u.document), password: '' })}
                         >
                           <Pencil size={14} />
                         </IconBtn>
@@ -259,7 +262,12 @@ export default function Usuarios() {
               </div>
             </div>
             <div>
-              <p className="mb-1 text-sm font-medium">Módulos liberados</p>
+              <p className="mb-1 text-sm font-medium">Módulos liberados pelo administrador</p>
+              {form.role !== 'admin' && (
+                <p className="mb-3 text-xs text-muted">
+                  Além destes, o usuário recebe automaticamente os módulos do plano enquanto a assinatura estiver paga.
+                </p>
+              )}
               {form.role === 'admin' ? (
                 <p className="text-sm text-muted">Administradores têm acesso a todos os módulos e à área administrativa.</p>
               ) : (

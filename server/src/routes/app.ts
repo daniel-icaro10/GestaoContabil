@@ -19,6 +19,7 @@ import {
   getSubscription,
   hasAccess,
   issueInvoice,
+  planModules,
   subscriptionState,
   syncInvoice,
   type Invoice,
@@ -223,7 +224,7 @@ appRouter.delete('/tax-config', requireAuth, requireSubscription, requireModule(
 // ---------------- Assinatura ----------------
 
 appRouter.get('/billing/plans', requireAuth, (_req, res) => {
-  res.json(all<Plan>('SELECT * FROM plans WHERE active = 1 ORDER BY price_cents'));
+  res.json(all<Plan>('SELECT * FROM plans WHERE active = 1 ORDER BY price_cents').map((p) => ({ ...p, modules: planModules(p) })));
 });
 
 appRouter.get('/billing/me', requireAuth, (req, res) => {

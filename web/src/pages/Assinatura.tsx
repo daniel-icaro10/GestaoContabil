@@ -4,6 +4,7 @@ import { CheckCircle2, CircleDollarSign, RefreshCcw, ShieldCheck, XCircle } from
 import { useAuth } from '../context/AuthContext';
 import { api } from '../lib/api';
 import { cents, dateBR, intervalLabel } from '../lib/format';
+import { moduleLabel, type ModuleId } from '../lib/pages';
 import { Alert, Badge, Button, Card, CardTitle, Empty, PageHeader, Spinner, clsx, useToast } from '../components/ui';
 import { InvoicePayment, InvoiceStatus, type InvoiceRow } from '../components/InvoicePayment';
 
@@ -13,6 +14,7 @@ interface Plan {
   description: string;
   price_cents: number;
   interval_months: number;
+  modules?: ModuleId[];
 }
 
 interface BillingInfo {
@@ -244,6 +246,13 @@ export default function Assinatura() {
                     </p>
                     {p.interval_months > 1 && <p className="num text-xs text-muted">equivale a {cents(monthly)}/mês</p>}
                     {p.description && <p className="mt-3 text-sm text-muted">{p.description}</p>}
+                    {p.modules && p.modules.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-1">
+                        {p.modules.map((m) => (
+                          <Badge key={m}>{moduleLabel(m)}</Badge>
+                        ))}
+                      </div>
+                    )}
                   </button>
                 );
               })}

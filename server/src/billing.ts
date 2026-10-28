@@ -1,6 +1,6 @@
 import { all, get, run } from './db.js';
 import { cora, CoraError, type CoraInvoice } from './cora.js';
-import { getSettings, isCoraConfigured } from './settings.js';
+import { MODULE_IDS, getSettings, isCoraConfigured, toModules, type ModuleId } from './settings.js';
 
 export interface Plan {
   id: number;
@@ -9,6 +9,17 @@ export interface Plan {
   price_cents: number;
   interval_months: number;
   active: number;
+  modules: string | null;
+}
+
+/** Módulos liberados pelo plano. Planos sem a lista definida liberam todos. */
+export function planModules(plan: Pick<Plan, 'modules'>): ModuleId[] {
+  if (plan.modules == null) return [...MODULE_IDS];
+  try {
+    return toModules(JSON.parse(plan.modules));
+  } catch {
+    return [];
+  }
 }
 
 export interface Subscription {
@@ -83,6 +94,15 @@ export function hasAccess(user: { id: number; role: string }) {
   if (!getSettings().requireSubscription) return true;
   const state = subscriptionState(getSubscription(user.id));
   return state === 'active' || state === 'grace';
+}
+
+/** Módulos do plano da assinatura, enquanto ela estiver ativa (ou na tolerância). */
+export function subscriptionModules(userId: number): ModuleId[] {
+  const sub = getSubscription(userId);
+  const state = subscriptionState(sub);
+  if (state !== 'active' && state !== 'grace') return [];
+  const plan = get<Plan>('SELECT * FROM plans WHERE id = ?', [sub!.plan_id]);
+  return plan ? planModules(plan) : [];
 }
 
 export function openInvoiceFor(userId: number) {

@@ -157,6 +157,10 @@ export async function initDb() {
   db = fs.existsSync(DB_FILE) ? new SQL.Database(fs.readFileSync(DB_FILE)) : new SQL.Database();
   db.run('PRAGMA foreign_keys = ON');
   db.exec(SCHEMA);
+  // Migrações de colunas adicionadas depois da criação das tabelas.
+  const cols = all<{ name: string }>('PRAGMA table_info(plans)').map((c) => c.name);
+  // Módulos liberados pelo plano (JSON). NULL = todos os módulos.
+  if (!cols.includes('modules')) db.run('ALTER TABLE plans ADD COLUMN modules TEXT');
   persistNow();
 
   const flush = () => {

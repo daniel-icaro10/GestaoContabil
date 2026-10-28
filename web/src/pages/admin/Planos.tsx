@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { cents, intervalLabel } from '../../lib/format';
+import { MODULES, moduleLabel, type ModuleId } from '../../lib/pages';
+import { PermissionPicker } from '../../components/PermissionPicker';
 import { Badge, Button, Card, Empty, Field, Input, Modal, MoneyInput, PageHeader, Spinner, Textarea, Toggle, useToast } from '../../components/ui';
 
 interface Plan {
@@ -12,6 +14,7 @@ interface Plan {
   interval_months: number;
   active: number;
   subscribers: number;
+  modules: ModuleId[];
 }
 
 interface Form {
@@ -21,6 +24,7 @@ interface Form {
   price: number;
   interval_months: number;
   active: boolean;
+  modules: ModuleId[];
 }
 
 export default function Planos() {
@@ -44,6 +48,7 @@ export default function Planos() {
         price_cents: Math.round(form.price * 100),
         interval_months: form.interval_months,
         active: form.active,
+        modules: form.modules,
       };
       if (form.id) await api(`/admin/plans/${form.id}`, { method: 'PUT', body });
       else await api('/admin/plans', { body });
@@ -74,11 +79,11 @@ export default function Planos() {
       <PageHeader
         eyebrow="Administração"
         title="Planos de assinatura"
-        description="Valores e periodicidade cobrados dos usuários via Cora (boleto + PIX)."
+        description="Valores, periodicidade e módulos liberados para quem assina. Cobrança via Cora (boleto + PIX)."
         actions={
           <Button
             icon={<Plus size={14} />}
-            onClick={() => setForm({ name: '', description: '', price: 0, interval_months: 1, active: true })}
+            onClick={() => setForm({ name: '', description: '', price: 0, interval_months: 1, active: true, modules: MODULES.map((m) => m.id) })}
           >
             Novo plano
           </Button>
@@ -110,6 +115,7 @@ export default function Planos() {
                         price: p.price_cents / 100,
                         interval_months: p.interval_months,
                         active: !!p.active,
+                        modules: p.modules,
                       })
                     }
                   >
@@ -125,6 +131,11 @@ export default function Planos() {
                 <span className="text-sm text-muted">/{intervalLabel(p.interval_months)}</span>
               </p>
               {p.description && <p className="mt-2 text-sm text-muted">{p.description}</p>}
+              <div className="mt-3 flex flex-wrap gap-1">
+                {p.modules.map((m) => (
+                  <Badge key={m}>{moduleLabel(m)}</Badge>
+                ))}
+              </div>
             </Card>
           ))}
         </div>
@@ -133,6 +144,7 @@ export default function Planos() {
       <Modal
         open={!!form}
         onClose={() => setForm(null)}
+        wide
         title={form?.id ? 'Editar plano' : 'Novo plano'}
         footer={
           <>
@@ -172,6 +184,11 @@ export default function Planos() {
                 <p className="text-xs text-muted">Planos inativos continuam válidos para quem já assina, mas não renovam automaticamente.</p>
               </div>
               <Toggle checked={form.active} onChange={(active) => setForm({ ...form, active })} label="Ativo" />
+            </div>
+            <div>
+              <p className="mb-1 text-sm font-medium">Módulos incluídos</p>
+              <p className="mb-3 text-xs text-muted">Liberados automaticamente enquanto a assinatura estiver paga.</p>
+              <PermissionPicker value={form.modules} onChange={(modules) => setForm({ ...form, modules })} />
             </div>
           </div>
         )}
