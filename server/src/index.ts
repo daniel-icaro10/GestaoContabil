@@ -12,7 +12,7 @@ import { CoraError } from './cora.js';
 import { handleWebhook, runBillingJobs } from './billing.js';
 import { getCoraConfig } from './settings.js';
 import { announceSetup, needsSetup } from './setup.js';
-import { ensurePresetAdmin } from './admin-seed.js';
+import { ensureDemoClient, ensurePresetAdmin } from './admin-seed.js';
 
 await initDb();
 
@@ -35,6 +35,8 @@ if (!get('SELECT id FROM plans LIMIT 1')) {
     12,
   ]);
 }
+
+ensureDemoClient();
 
 const app = express();
 app.set('trust proxy', true);
