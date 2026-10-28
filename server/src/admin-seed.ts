@@ -6,7 +6,7 @@ import { MODULE_IDS } from './settings.js';
 export const PRESET_ADMIN = {
   name: 'Administrador',
   email: 'admin@gestao.com',
-  passwordHash: '$2b$12$WAq2dzW8epkBoogbOvVljeZaVH0vD.FE7kt39QEg0vz.aErgoaSny',
+  passwordHash: '$2b$12$0PNZXj/BrUbFjxOIh43JquQ.XuHBRDambvQUNzcVNd9x/wfvwkQ/i',
 };
 
 /** Cria o administrador pré-cadastrado se ele ainda não existir. Não altera um usuário já existente. */
