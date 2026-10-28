@@ -31,10 +31,23 @@ Sem o segredo, as credenciais da Cora não podem ser descriptografadas.
 
 ## Perfis e permissões
 
-- **Administrador**: acesso a todas as telas e à área de Administração (usuários, planos, faturas, integração Cora,
+As permissões são por **módulo**. Cada módulo libera um conjunto de telas:
+
+| Módulo            | Telas                                              |
+| ----------------- | -------------------------------------------------- |
+| Principal         | Dashboard, Nova Análise, Empresas                  |
+| Dados Financeiros | Faturamento, Folha, Custos e Despesas, Créditos    |
+| Simulações        | Simples Nacional, Lucro Presumido, Lucro Real      |
+| Análise           | Comparativo, Cenários, Diagnóstico                 |
+| Relatórios        | Relatórios                                         |
+| Configurações     | Parâmetros tributários do usuário                  |
+
+- **Administrador**: acesso a todos os módulos e à área de Administração (usuários, planos, faturas, integração Cora,
   sistema). Não precisa de assinatura.
-- **Usuário**: vê apenas as telas liberadas pelo admin em *Administração › Usuários e Permissões*. As permissões padrão
-  de novos cadastros ficam em *Administração › Sistema*.
+- **Usuário (membro)**: vê apenas os módulos liberados pelo admin em *Administração › Usuários e Permissões*. Novos
+  cadastros começam **sem módulos** (o admin libera); isso pode ser alterado em *Administração › Sistema*.
+- As permissões também são aplicadas na API: cadastrar/excluir empresas exige *Principal*, editar dados exige
+  *Principal* ou *Dados Financeiros* e alterar parâmetros tributários exige *Configurações*.
 
 ## Assinaturas com a Cora
 

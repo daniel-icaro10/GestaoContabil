@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Save } from 'lucide-react';
 import { api } from '../../lib/api';
-import type { PageId } from '../../lib/pages';
+import type { ModuleId } from '../../lib/pages';
 import { PermissionPicker } from '../../components/PermissionPicker';
 import { Button, Card, CardTitle, Checkbox, Field, Input, PageHeader, Spinner, Toggle, useToast } from '../../components/ui';
 
 interface Settings {
   allowSignup: boolean;
   requireSubscription: boolean;
-  defaultPermissions: PageId[];
+  defaultModules: ModuleId[];
   dueDays: number;
   renewalLeadDays: number;
   graceDays: number;
@@ -45,11 +45,11 @@ export default function Sistema() {
   const save = async () => {
     setBusy(true);
     try {
-      const { allowSignup, requireSubscription, defaultPermissions, dueDays, renewalLeadDays, graceDays, finePercent, interestPercent, paymentForms } = s;
+      const { allowSignup, requireSubscription, defaultModules, dueDays, renewalLeadDays, graceDays, finePercent, interestPercent, paymentForms } = s;
       setS(
         await api('/admin/settings', {
           method: 'PUT',
-          body: { allowSignup, requireSubscription, defaultPermissions, dueDays, renewalLeadDays, graceDays, finePercent, interestPercent, paymentForms },
+          body: { allowSignup, requireSubscription, defaultModules, dueDays, renewalLeadDays, graceDays, finePercent, interestPercent, paymentForms },
         }),
       );
       toast('Configurações salvas.');
@@ -113,9 +113,12 @@ export default function Sistema() {
       </Card>
 
       <Card>
-        <CardTitle>Permissões padrão para novos usuários</CardTitle>
-        <p className="mb-4 text-sm text-muted">Aplicadas a contas criadas pelo cadastro público. Ajuste individualmente em Usuários.</p>
-        <PermissionPicker value={s.defaultPermissions} onChange={(defaultPermissions) => setS({ ...s, defaultPermissions })} />
+        <CardTitle>Módulos padrão para novos usuários</CardTitle>
+        <p className="mb-4 text-sm text-muted">
+          Aplicados a contas criadas pelo cadastro público. Deixe todos desmarcados para que o novo usuário só veja o sistema
+          depois que você liberar os módulos em Usuários.
+        </p>
+        <PermissionPicker value={s.defaultModules} onChange={(defaultModules) => setS({ ...s, defaultModules })} />
       </Card>
     </div>
   );

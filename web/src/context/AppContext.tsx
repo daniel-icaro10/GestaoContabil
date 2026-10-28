@@ -71,7 +71,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const companiesRef = useRef(companies);
   companiesRef.current = companies;
 
-  const enabled = Boolean(session?.access.hasAccess);
+  // Sem nenhum módulo liberado não há dados para carregar.
+  const enabled = Boolean(session?.access.hasAccess && session.user.permissions.length);
   const userName = session?.user.name ?? '';
 
   const reload = useCallback(async () => {

@@ -6,11 +6,13 @@ import {
   HttpError,
   publicUser,
   requireAuth,
+  requireModule,
   requireSubscription,
   signToken,
+  userModules,
   type UserRow,
 } from '../auth.js';
-import { PAGES, getSettings, isCoraConfigured } from '../settings.js';
+import { MODULE_IDS, getSettings, isCoraConfigured } from '../settings.js';
 import { needsSetup } from '../setup.js';
 import {
   cancelInvoice,
@@ -65,7 +67,7 @@ appRouter.post('/auth/setup', (req, res) => {
     body.email,
     bcrypt.hashSync(body.password, 10),
     'admin',
-    JSON.stringify(PAGES),
+    JSON.stringify(MODULE_IDS),
   ]);
   console.log(`[setup] Administrador criado: ${body.email}`);
   const user = get<UserRow>('SELECT * FROM users WHERE id = ?', [lastId])!;
@@ -87,7 +89,7 @@ appRouter.post('/auth/register', (req, res) => {
       body.email,
       bcrypt.hashSync(body.password, 10),
       'user',
-      JSON.stringify(settings.defaultPermissions),
+      JSON.stringify(settings.defaultModules),
       body.document?.replace(/\D/g, '') || null,
     ],
   );
@@ -136,6 +138,8 @@ appRouter.put('/auth/profile', requireAuth, (req, res) => {
 });
 
 // ---------------- Empresas e análises ----------------
+// Leitura: qualquer módulo liberado. Criar/excluir empresas: módulo Principal. Editar dados: Principal ou Dados Financeiros.
+const anyModule = requireModule();
 
 const companyData = z.object({
   empresa: z.record(z.string(), z.any()),
@@ -158,19 +162,24 @@ function ownCompany(userId: number, id: number) {
   return row;
 }
 
-appRouter.get('/companies', requireAuth, requireSubscription, (req, res) => {
+appRouter.get('/companies', requireAuth, requireSubscription, anyModule, (req, res) => {
   const rows = all('SELECT * FROM companies WHERE user_id = ? ORDER BY updated_at DESC', [req.user!.id]);
   res.json(rows.map(serializeCompany));
 });
 
-appRouter.post('/companies', requireAuth, requireSubscription, (req, res) => {
+appRouter.post('/companies', requireAuth, requireSubscription, anyModule, (req, res) => {
+  // Sem o módulo Principal só é permitido criar a análise inicial (quando o usuário não tem nenhuma empresa).
+  const hasCompany = get('SELECT id FROM companies WHERE user_id = ? LIMIT 1', [req.user!.id]);
+  if (hasCompany && !userModules(req.user!).includes('principal')) {
+    throw new HttpError(403, 'Você não tem permissão para cadastrar empresas.');
+  }
   const data = companyData.parse(req.body);
   const { lastId } = run('INSERT INTO companies (user_id, data) VALUES (?, ?)', [req.user!.id, JSON.stringify(data)]);
   run('UPDATE users SET current_company_id = ? WHERE id = ?', [lastId, req.user!.id]);
   res.status(201).json(serializeCompany(ownCompany(req.user!.id, lastId)));
 });
 
-appRouter.put('/companies/:id', requireAuth, requireSubscription, (req, res) => {
+appRouter.put('/companies/:id', requireAuth, requireSubscription, requireModule('principal', 'dados-financeiros'), (req, res) => {
   const id = Number(req.params.id);
   ownCompany(req.user!.id, id);
   const data = companyData.parse(req.body);
@@ -178,7 +187,7 @@ appRouter.put('/companies/:id', requireAuth, requireSubscription, (req, res) => 
   res.json(serializeCompany(ownCompany(req.user!.id, id)));
 });
 
-appRouter.delete('/companies/:id', requireAuth, requireSubscription, (req, res) => {
+appRouter.delete('/companies/:id', requireAuth, requireSubscription, requireModule('principal'), (req, res) => {
   const id = Number(req.params.id);
   ownCompany(req.user!.id, id);
   run('DELETE FROM companies WHERE id = ?', [id]);
@@ -186,7 +195,7 @@ appRouter.delete('/companies/:id', requireAuth, requireSubscription, (req, res) 
   res.status(204).end();
 });
 
-appRouter.put('/companies/:id/select', requireAuth, requireSubscription, (req, res) => {
+appRouter.put('/companies/:id/select', requireAuth, requireSubscription, anyModule, (req, res) => {
   const id = Number(req.params.id);
   ownCompany(req.user!.id, id);
   run('UPDATE users SET current_company_id = ? WHERE id = ?', [id, req.user!.id]);
@@ -195,18 +204,18 @@ appRouter.put('/companies/:id/select', requireAuth, requireSubscription, (req, r
 
 // ---------------- Configurações tributárias do usuário ----------------
 
-appRouter.get('/tax-config', requireAuth, requireSubscription, (req, res) => {
+appRouter.get('/tax-config', requireAuth, requireSubscription, anyModule, (req, res) => {
   res.json(req.user!.tax_config ? JSON.parse(req.user!.tax_config) : null);
 });
 
-appRouter.put('/tax-config', requireAuth, requireSubscription, (req, res) => {
+appRouter.put('/tax-config', requireAuth, requireSubscription, requireModule('configuracoes'), (req, res) => {
   const body = z.record(z.string(), z.any()).parse(req.body);
   run('UPDATE users SET tax_config = ? WHERE id = ?', [JSON.stringify(body), req.user!.id]);
   res.json(body);
 });
 
 // Restaura os parâmetros padrão.
-appRouter.delete('/tax-config', requireAuth, requireSubscription, (req, res) => {
+appRouter.delete('/tax-config', requireAuth, requireSubscription, requireModule('configuracoes'), (req, res) => {
   run('UPDATE users SET tax_config = NULL WHERE id = ?', [req.user!.id]);
   res.status(204).end();
 });

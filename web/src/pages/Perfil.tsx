@@ -3,7 +3,7 @@ import { Save } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../lib/api';
 import { dateBR, maskCpfCnpj } from '../lib/format';
-import { pageLabel } from '../lib/pages';
+import { moduleLabel } from '../lib/pages';
 import { Badge, Button, Card, CardTitle, Field, Input, PageHeader, useToast } from '../components/ui';
 
 export default function Perfil() {
@@ -75,9 +75,9 @@ export default function Perfil() {
           </div>
           {u.role !== 'admin' && (
             <div className="mt-4">
-              <p className="label-xs mb-2">Telas liberadas</p>
+              <p className="label-xs mb-2">Módulos liberados</p>
               <div className="flex flex-wrap gap-1.5">
-                {u.permissions.length ? u.permissions.map((p) => <Badge key={p}>{pageLabel(p)}</Badge>) : <span className="text-sm text-muted">Nenhuma tela liberada.</span>}
+                {u.modules.length ? u.modules.map((m) => <Badge key={m}>{moduleLabel(m)}</Badge>) : <span className="text-sm text-muted">Nenhum módulo liberado. Solicite ao administrador.</span>}
               </div>
             </div>
           )}

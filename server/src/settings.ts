@@ -22,10 +22,32 @@ export const PAGES = [
 ] as const;
 export type PageId = (typeof PAGES)[number];
 
+// Módulos: o admin libera módulos inteiros para cada usuário; cada módulo agrupa um conjunto de telas.
+export const MODULES = {
+  principal: ['dashboard', 'nova-analise', 'empresas'],
+  'dados-financeiros': ['faturamento', 'folha', 'custos', 'creditos'],
+  simulacoes: ['simples-nacional', 'lucro-presumido', 'lucro-real'],
+  analise: ['comparativo', 'cenarios', 'diagnostico'],
+  relatorios: ['relatorio'],
+  configuracoes: ['configuracoes'],
+} as const satisfies Record<string, readonly PageId[]>;
+export type ModuleId = keyof typeof MODULES;
+export const MODULE_IDS = Object.keys(MODULES) as ModuleId[];
+
+/** Normaliza uma lista salva de módulos. Aceita o formato antigo (ids de telas) e converte para o módulo da tela. */
+export function toModules(list: unknown): ModuleId[] {
+  if (!Array.isArray(list)) return [];
+  return MODULE_IDS.filter((m) => list.includes(m) || MODULES[m].some((p) => list.includes(p)));
+}
+
+export function modulePages(modules: ModuleId[]): PageId[] {
+  return PAGES.filter((p) => modules.some((m) => (MODULES[m] as readonly PageId[]).includes(p)));
+}
+
 export interface AppSettings {
   allowSignup: boolean;
   requireSubscription: boolean;
-  defaultPermissions: PageId[];
+  defaultModules: ModuleId[];
   dueDays: number; // dias até o vencimento da fatura emitida
   renewalLeadDays: number; // dias antes do fim do período para emitir a renovação
   graceDays: number; // tolerância após o fim do período antes de bloquear
@@ -37,7 +59,8 @@ export interface AppSettings {
 const DEFAULT_SETTINGS: AppSettings = {
   allowSignup: true,
   requireSubscription: true,
-  defaultPermissions: [...PAGES],
+  // Novos cadastros começam sem módulos: o admin libera o que cada usuário pode ver.
+  defaultModules: [],
   dueDays: 3,
   renewalLeadDays: 5,
   graceDays: 3,
@@ -69,7 +92,11 @@ function writeJson(key: string, value: unknown) {
 }
 
 export function getSettings(): AppSettings {
-  return { ...DEFAULT_SETTINGS, ...(readJson<Partial<AppSettings>>('app') ?? {}) };
+  const { defaultPermissions, ...stored } = readJson<Partial<AppSettings> & { defaultPermissions?: string[] }>('app') ?? {};
+  const s = { ...DEFAULT_SETTINGS, ...stored };
+  // Configuração antiga guardava telas em defaultPermissions.
+  s.defaultModules = toModules(stored.defaultModules ?? defaultPermissions ?? s.defaultModules);
+  return s;
 }
 
 export function saveSettings(patch: Partial<AppSettings>): AppSettings {

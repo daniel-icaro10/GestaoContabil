@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { all, get, run } from '../db.js';
 import { HttpError, publicUser, requireAdmin, requireAuth, type UserRow } from '../auth.js';
 import {
-  PAGES,
+  MODULE_IDS,
   getCoraConfig,
   getSettings,
   isCoraConfigured,
@@ -30,7 +30,7 @@ import { env } from '../env.js';
 export const adminRouter = Router();
 adminRouter.use(requireAuth, requireAdmin);
 
-const pageList = z.array(z.enum(PAGES));
+const moduleList = z.array(z.enum(MODULE_IDS));
 
 // ---------------- Painel ----------------
 
@@ -94,7 +94,7 @@ const userBody = z.object({
   email: z.string().trim().toLowerCase().email('E-mail inválido'),
   role: z.enum(['admin', 'user']),
   active: z.boolean().default(true),
-  permissions: pageList,
+  modules: moduleList,
   document: z.string().trim().optional().default(''),
   phone: z.string().trim().optional().default(''),
   password: z.string().optional().default(''),
@@ -113,7 +113,7 @@ adminRouter.post('/users', (req, res) => {
       bcrypt.hashSync(b.password, 10),
       b.role,
       b.active,
-      JSON.stringify(b.permissions),
+      JSON.stringify(b.modules),
       b.document.replace(/\D/g, '') || null,
       b.phone || null,
     ],
@@ -133,7 +133,7 @@ adminRouter.put('/users/:id', (req, res) => {
   if (dup) throw new HttpError(409, 'E-mail já cadastrado');
   run(
     `UPDATE users SET name = ?, email = ?, role = ?, active = ?, permissions = ?, document = ?, phone = ? WHERE id = ?`,
-    [b.name, b.email, b.role, b.active, JSON.stringify(b.permissions), b.document.replace(/\D/g, '') || null, b.phone || null, id],
+    [b.name, b.email, b.role, b.active, JSON.stringify(b.modules), b.document.replace(/\D/g, '') || null, b.phone || null, id],
   );
   if (b.password) {
     if (b.password.length < 6) throw new HttpError(400, 'A senha deve ter ao menos 6 caracteres');
@@ -294,7 +294,7 @@ adminRouter.post('/billing/run', async (_req, res) => {
 // ---------------- Configurações gerais ----------------
 
 adminRouter.get('/settings', (_req, res) => {
-  res.json({ ...getSettings(), pages: PAGES });
+  res.json({ ...getSettings(), modules: MODULE_IDS });
 });
 
 adminRouter.put('/settings', (req, res) => {
@@ -302,7 +302,7 @@ adminRouter.put('/settings', (req, res) => {
     .object({
       allowSignup: z.boolean(),
       requireSubscription: z.boolean(),
-      defaultPermissions: pageList,
+      defaultModules: moduleList,
       dueDays: z.number().int().min(1).max(60),
       renewalLeadDays: z.number().int().min(0).max(60),
       graceDays: z.number().int().min(0).max(60),
@@ -311,7 +311,7 @@ adminRouter.put('/settings', (req, res) => {
       paymentForms: z.array(z.enum(['BANK_SLIP', 'PIX'])).min(1, 'Selecione ao menos uma forma de pagamento'),
     })
     .parse(req.body);
-  res.json({ ...saveSettings(b), pages: PAGES });
+  res.json({ ...saveSettings(b), modules: MODULE_IDS });
 });
 
 // ---------------- Integração Cora ----------------

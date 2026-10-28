@@ -1,5 +1,5 @@
 import { get, run } from './db.js';
-import { PAGES } from './settings.js';
+import { MODULE_IDS } from './settings.js';
 
 // Administrador pré-cadastrado. Guardamos apenas o hash bcrypt da senha — nunca a senha em texto.
 // Para trocar: gere um novo hash com `npm --prefix server run hash-senha` e substitua passwordHash.
@@ -19,7 +19,7 @@ export function ensurePresetAdmin() {
     email,
     PRESET_ADMIN.passwordHash,
     'admin',
-    JSON.stringify(PAGES),
+    JSON.stringify(MODULE_IDS),
   ]);
   console.log(`[setup] Administrador pré-cadastrado criado: ${email}`);
 }

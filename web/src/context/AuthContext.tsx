@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, onApiStatus, setToken, getToken } from '../lib/api';
-import type { PageId } from '../lib/pages';
+import type { ModuleId, PageId } from '../lib/pages';
 
 export interface SessionUser {
   id: number;
@@ -8,6 +8,8 @@ export interface SessionUser {
   email: string;
   role: 'admin' | 'user';
   active: boolean;
+  modules: ModuleId[];
+  /** Telas liberadas, derivadas dos módulos. */
   permissions: PageId[];
   document: string;
   phone: string;

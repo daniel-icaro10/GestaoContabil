@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { get } from './db.js';
 import { env } from './env.js';
 import { hasAccess } from './billing.js';
-import { PAGES, type PageId } from './settings.js';
+import { MODULE_IDS, modulePages, toModules, type ModuleId, type PageId } from './settings.js';
 
 export interface UserRow {
   id: number;
@@ -42,14 +42,18 @@ export function signToken(user: UserRow) {
   return jwt.sign({ sub: String(user.id) }, env.appSecret, { expiresIn: '7d' });
 }
 
-export function userPermissions(user: UserRow): PageId[] {
-  if (user.role === 'admin') return [...PAGES];
+/** Módulos liberados para o usuário (a coluna `permissions` guarda os ids dos módulos). */
+export function userModules(user: UserRow): ModuleId[] {
+  if (user.role === 'admin') return [...MODULE_IDS];
   try {
-    const list = JSON.parse(user.permissions) as string[];
-    return PAGES.filter((p) => list.includes(p));
+    return toModules(JSON.parse(user.permissions));
   } catch {
     return [];
   }
+}
+
+export function userPermissions(user: UserRow): PageId[] {
+  return modulePages(userModules(user));
 }
 
 export function publicUser(user: UserRow) {
@@ -59,6 +63,7 @@ export function publicUser(user: UserRow) {
     email: user.email,
     role: user.role,
     active: Boolean(user.active),
+    modules: userModules(user),
     permissions: userPermissions(user),
     document: user.document ?? '',
     phone: user.phone ?? '',
@@ -85,6 +90,16 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction) {
 export function requireAdmin(req: Request, _res: Response, next: NextFunction) {
   if (req.user?.role !== 'admin') return next(new HttpError(403, 'Acesso restrito ao administrador'));
   next();
+}
+
+/** Exige que o usuário tenha ao menos um dos módulos informados (sem argumentos: qualquer módulo). */
+export function requireModule(...modules: ModuleId[]) {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    const mine = req.user ? userModules(req.user) : [];
+    const ok = modules.length ? modules.some((m) => mine.includes(m)) : mine.length > 0;
+    if (!ok) return next(new HttpError(403, 'Você não tem permissão para este módulo. Solicite a liberação ao administrador.'));
+    next();
+  };
 }
 
 /** Bloqueia os dados do sistema para usuários sem assinatura ativa. */

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { CalendarClock, Pencil, Plus, Search, ShieldOff, Trash2, UserRound } from 'lucide-react';
 import { api } from '../../lib/api';
 import { dateBR, formatDoc, maskCpfCnpj } from '../../lib/format';
-import { PAGES, type PageId } from '../../lib/pages';
+import { MODULES, type ModuleId } from '../../lib/pages';
 import { useAuth } from '../../context/AuthContext';
 import { PermissionPicker } from '../../components/PermissionPicker';
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Spinner, Toggle, clsx, useToast } from '../../components/ui';
@@ -13,7 +13,7 @@ interface AdminUser {
   email: string;
   role: 'admin' | 'user';
   active: boolean;
-  permissions: PageId[];
+  modules: ModuleId[];
   document: string;
   phone: string;
   companies: number;
@@ -37,12 +37,12 @@ const SUB_BADGE: Record<string, { label: string; tone: 'ok' | 'warn' | 'danger' 
 
 type FormState = Omit<AdminUser, 'id' | 'companies' | 'createdAt' | 'subscription'> & { id?: number; password: string };
 
-const emptyForm = (perms: PageId[]): FormState => ({
+const emptyForm = (modules: ModuleId[]): FormState => ({
   name: '',
   email: '',
   role: 'user',
   active: true,
-  permissions: perms,
+  modules,
   document: '',
   phone: '',
   password: '',
@@ -53,7 +53,7 @@ export default function Usuarios() {
   const toast = useToast();
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
-  const [defaultPerms, setDefaultPerms] = useState<PageId[]>(PAGES.map((p) => p.id));
+  const [defaultPerms, setDefaultPerms] = useState<ModuleId[]>([]);
   const [q, setQ] = useState('');
   const [form, setForm] = useState<FormState | null>(null);
   const [access, setAccess] = useState<{ user: AdminUser; planId: number; until: string } | null>(null);
@@ -64,11 +64,11 @@ export default function Usuarios() {
     const [u, p, s] = await Promise.all([
       api<AdminUser[]>('/admin/users'),
       api<Plan[]>('/admin/plans'),
-      api<{ defaultPermissions: PageId[] }>('/admin/settings'),
+      api<{ defaultModules: ModuleId[] }>('/admin/settings'),
     ]);
     setUsers(u);
     setPlans(p);
-    setDefaultPerms(s.defaultPermissions);
+    setDefaultPerms(s.defaultModules);
   }, []);
 
   useEffect(() => {
@@ -108,7 +108,7 @@ export default function Usuarios() {
       <PageHeader
         eyebrow="Administração"
         title="Usuários e permissões"
-        description="Crie usuários, defina o perfil e escolha quais telas cada um pode acessar."
+        description="Crie usuários, defina o perfil e escolha quais módulos cada um pode acessar."
         actions={
           <Button icon={<Plus size={14} />} onClick={() => setForm(emptyForm(defaultPerms))}>
             Novo usuário
@@ -126,7 +126,7 @@ export default function Usuarios() {
               <tr>
                 <th>Usuário</th>
                 <th>Perfil</th>
-                <th>Telas</th>
+                <th>Módulos</th>
                 <th>Assinatura</th>
                 <th>Empresas</th>
                 <th>Status</th>
@@ -150,7 +150,7 @@ export default function Usuarios() {
                       </div>
                     </td>
                     <td>{u.role === 'admin' ? <Badge tone="accent">Admin</Badge> : <Badge>Usuário</Badge>}</td>
-                    <td className="num text-xs text-muted">{u.role === 'admin' ? 'Todas' : `${u.permissions.length}/${PAGES.length}`}</td>
+                    <td className="num text-xs text-muted">{u.role === 'admin' ? 'Todos' : `${u.modules.length}/${MODULES.length}`}</td>
                     <td>
                       {u.role === 'admin' ? (
                         <span className="text-xs text-muted">—</span>
@@ -259,11 +259,11 @@ export default function Usuarios() {
               </div>
             </div>
             <div>
-              <p className="mb-1 text-sm font-medium">Telas permitidas</p>
+              <p className="mb-1 text-sm font-medium">Módulos liberados</p>
               {form.role === 'admin' ? (
-                <p className="text-sm text-muted">Administradores têm acesso a todas as telas e à área administrativa.</p>
+                <p className="text-sm text-muted">Administradores têm acesso a todos os módulos e à área administrativa.</p>
               ) : (
-                <PermissionPicker value={form.permissions} onChange={(permissions) => setForm({ ...form, permissions })} />
+                <PermissionPicker value={form.modules} onChange={(modules) => setForm({ ...form, modules })} />
               )}
             </div>
           </div>

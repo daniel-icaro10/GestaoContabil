@@ -26,7 +26,7 @@ import {
 import clsx from 'clsx';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
-import { PAGES, PAGE_GROUPS, pageLabel } from '../lib/pages';
+import { MODULES, modulePages, pageLabel } from '../lib/pages';
 import { dateBR, money } from '../lib/format';
 import { soma } from '../lib/tax';
 import { Badge } from './ui';
@@ -85,7 +85,7 @@ function NavItem({ to, icon: Icon, label, end, onClick }: { to: string; icon: an
 function Sidebar({ open, onClose }: { open: boolean; onClose(): void }) {
   const { session, can, isAdmin } = useAuth();
   const locked = Boolean(session && session.access.requireSubscription && !session.access.hasAccess);
-  const groups = PAGE_GROUPS.map((g) => ({ group: g, items: PAGES.filter((p) => p.group === g && can(p.id)) })).filter(
+  const groups = MODULES.map((m) => ({ group: m.label, items: modulePages(m.id).filter((p) => can(p.id)) })).filter(
     (g) => g.items.length,
   );
   return (
