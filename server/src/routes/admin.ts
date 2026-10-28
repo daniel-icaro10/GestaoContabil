@@ -19,6 +19,7 @@ import {
   cancelInvoice,
   getSubscription,
   issueInvoice,
+  OPEN_STATUSES,
   planModules,
   subscriptionState,
   syncInvoice,
@@ -176,8 +177,15 @@ adminRouter.post('/users/:id/access', (req, res) => {
   res.json(adminUserView(get<UserRow>('SELECT * FROM users WHERE id = ?', [id])!));
 });
 
-adminRouter.post('/users/:id/revoke', (req, res) => {
+adminRouter.post('/users/:id/revoke', async (req, res) => {
   const id = Number(req.params.id);
+  // Cancela as cobranças em aberto antes, para que o pagamento de um boleto antigo não devolva o acesso.
+  for (const inv of all<Invoice>(
+    `SELECT * FROM invoices WHERE user_id = ? AND applied = 0 AND status IN (${OPEN_STATUSES.map(() => '?').join(',')})`,
+    [id, ...OPEN_STATUSES],
+  )) {
+    await cancelInvoice(inv);
+  }
   run(`UPDATE subscriptions SET status = 'canceled', current_period_end = ?, updated_at = datetime('now') WHERE user_id = ?`, [
     new Date(Date.now() - 365 * 86_400_000).toISOString(),
     id,

@@ -129,8 +129,21 @@ function updateFromCora(invoiceId: number, inv: CoraInvoice) {
   );
 }
 
+// Usuários com emissão em andamento: evita duas cobranças por cliques repetidos ou renovação simultânea.
+const issuing = new Set<number>();
+
 /** Garante a assinatura do usuário para o plano e emite a fatura na Cora. */
 export async function issueInvoice(userId: number, planId: number, opts: { dueDate?: string } = {}) {
+  if (issuing.has(userId)) throw new CoraError('Já existe uma cobrança sendo gerada. Aguarde alguns segundos.', 409);
+  issuing.add(userId);
+  try {
+    return await emitInvoice(userId, planId, opts);
+  } finally {
+    issuing.delete(userId);
+  }
+}
+
+async function emitInvoice(userId: number, planId: number, opts: { dueDate?: string }) {
   const plan = get<Plan>('SELECT * FROM plans WHERE id = ?', [planId]);
   if (!plan) throw new CoraError('Plano não encontrado', 404);
   const user = get<{ id: number; name: string; email: string; document: string | null }>(

@@ -3,7 +3,7 @@ import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis
 import { Lightbulb, RefreshCcw, SlidersHorizontal } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { kfmt, money, pct } from '../lib/format';
-import { calcTodos, menorCarga, resumoRegimes, scaleData, soma } from '../lib/tax';
+import { calcTodos, menorCarga, resumoRegimes, scaleData, receitaAnual } from '../lib/tax';
 import { Button, Card, CardTitle, ChartTooltip, PageHeader, axisTick, clsx, gridStroke } from '../components/ui';
 
 function Slider({ label, value, onChange, min = -50, max = 50 }: { label: string; value: number; onChange(v: number): void; min?: number; max?: number }) {
@@ -36,7 +36,7 @@ export default function Cenarios() {
 
   const cenario = useMemo(() => {
     const scaled = scaleData(data, { fat, folha, custos, creditos });
-    return { res: calcTodos(scaled, taxConfig), rbt12: soma(scaled.faturamento.meses) };
+    return { res: calcTodos(scaled, taxConfig), rbt12: receitaAnual(scaled.faturamento.meses) };
   }, [data, taxConfig, fat, folha, custos, creditos]);
 
   const orig = resumoRegimes(results);

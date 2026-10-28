@@ -3,7 +3,7 @@ import { Check, CheckCircle2, ChevronRight, FilePlus2, Save } from 'lucide-react
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { MESES, money } from '../lib/format';
-import { mediaMensal, soma } from '../lib/tax';
+import { mediaMensal, receitaAnual } from '../lib/tax';
 import { CREDITO_FIELDS, CUSTO_FIELDS, DESPESA_FIELDS, FOLHA_FIELDS } from '../lib/fields';
 import { EmpresaForm } from '../components/EmpresaForm';
 import { Alert, Button, Card, MoneyInput, PageHeader, clsx, useToast } from '../components/ui';
@@ -28,7 +28,7 @@ export default function NovaAnalise() {
   const { data, setFaturamento, setFolha, setCustos, setCreditos } = app;
   const s = app.novaAnaliseStep;
   const setS = app.setNovaAnaliseStep;
-  const rbt12 = soma(data.faturamento.meses);
+  const rbt12 = receitaAnual(data.faturamento.meses);
   const media = mediaMensal(data.faturamento.meses);
   const go = (p: PageId) => (can(p) ? navigate(`/${p}`) : toast('Você não tem permissão para acessar esta tela.', 'danger'));
 

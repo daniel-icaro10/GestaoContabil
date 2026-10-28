@@ -125,7 +125,13 @@ export default function SimplesNacional() {
         </div>
       </Card>
 
-      {uso > 80 && (
+      {!t.elegivel && (
+        <Alert tone="danger">
+          A receita anual ({money(t.rbt12)}) ultrapassa o limite do Simples Nacional ({money(taxConfig.simplesLimite)}). A empresa não pode
+          optar por este regime; os valores abaixo são apenas referência e o Simples não entra na recomendação.
+        </Alert>
+      )}
+      {t.elegivel && uso > 80 && (
         <Alert tone="warn">
           O faturamento da empresa está próximo do limite do Simples Nacional ({money(taxConfig.simplesLimite)}). Recomenda-se
           análise antecipada sobre eventual necessidade de migração de regime tributário.

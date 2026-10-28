@@ -2,13 +2,13 @@ import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Too
 import { TrendingUp } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { MESES, MESES_CURTOS, kfmt, money, pct } from '../lib/format';
-import { mediaMensal, soma } from '../lib/tax';
+import { mediaMensal, receitaAnual } from '../lib/tax';
 import { Card, CardTitle, ChartTooltip, MoneyInput, PageHeader, Progress, Stat, axisTick, gridStroke } from '../components/ui';
 
 export default function Faturamento() {
   const { data, setFaturamento, taxConfig } = useApp();
   const meses = data.faturamento.meses;
-  const rbt12 = soma(meses);
+  const rbt12 = receitaAnual(meses);
   const media = mediaMensal(meses);
   const serie = meses.map((v, i) => ({ mes: MESES_CURTOS[i], valor: v }));
   const positivos = meses.filter((v) => v > 0);

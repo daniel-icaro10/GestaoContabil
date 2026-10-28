@@ -2,14 +2,14 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { AlertCircle, CheckCircle2, Users } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { money, pct } from '../lib/format';
-import { fatorR, soma, totalFolha } from '../lib/tax';
+import { fatorR, receitaAnual, totalFolha } from '../lib/tax';
 import { FOLHA_FIELDS, PALETTE } from '../lib/fields';
 import { Alert, Card, CardTitle, ChartTooltip, Legend, MoneyInput, PageHeader, Progress } from '../components/ui';
 
 export default function Folha() {
   const { data, setFolha, taxConfig } = useApp();
   const total = totalFolha(data.folha);
-  const receita = soma(data.faturamento.meses);
+  const receita = receitaAnual(data.faturamento.meses);
   const fr = fatorR(data.folha, data.faturamento);
   const ok = fr >= taxConfig.fatorRLimite;
   const ratio = receita > 0 ? total / receita : 0;

@@ -5,7 +5,7 @@ import {
   menorCarga,
   resultadoOperacional,
   resumoRegimes,
-  soma,
+  receitaAnual,
   totalFolha,
   type CompanyData,
   type Resultados,
@@ -21,7 +21,7 @@ export interface PontoAtencao {
 export function montarDiagnostico(d: CompanyData, r: Resultados, cfg: TaxConfig) {
   const res = resultadoOperacional(d.faturamento, d.custos, d.folha);
   const fr = fatorR(d.folha, d.faturamento);
-  const receita = soma(d.faturamento.meses);
+  const receita = receitaAnual(d.faturamento.meses);
   const folha = totalFolha(d.folha);
   const folhaRatio = receita > 0 ? folha / receita : 0;
   const creditos = baseCreditos(d.creditos);
@@ -53,7 +53,9 @@ export function montarDiagnostico(d: CompanyData, r: Resultados, cfg: TaxConfig)
   ].filter(Boolean) as string[];
 
   const pontos: PontoAtencao[] = [];
-  if (receita > cfg.simplesLimite * 0.9)
+  if (receita > cfg.simplesLimite)
+    pontos.push({ tipo: 'alerta', texto: `Faturamento acima do limite do Simples Nacional (${money(cfg.simplesLimite)}). A empresa não pode optar pelo Simples e ele foi desconsiderado na recomendação.` });
+  else if (receita > cfg.simplesLimite * 0.9)
     pontos.push({ tipo: 'alerta', texto: `Faturamento próximo ao limite do Simples Nacional (${money(cfg.simplesLimite)}). Planejamento preventivo é recomendado.` });
   if (!anexoIII && (t.tipoAtividade === 'Serviços' || t.tipoAtividade === 'Atividades Mistas'))
     pontos.push({ tipo: 'alerta', texto: `Fator R abaixo de 28% (${pct(fr * 100)}). Empresa de serviços será enquadrada no Anexo V, com alíquotas mais elevadas.` });

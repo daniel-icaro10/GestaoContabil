@@ -89,8 +89,9 @@ export const DEFAULT_TAX_CONFIG: TaxConfig = {
   simplesLimite: 4800000,
   fatorRLimite: 0.28,
   presumido: { irpj: 0.15, adicionalIrpj: 0.1, limiteAdicional: 20000, csll: 0.09, pis: 0.0065, cofins: 0.03 },
-  presuncaoIrpj: { comercio: 0.08, servicos: 0.32, industria: 0.08, outros: 0.16 },
-  presuncaoCsll: { comercio: 0.12, servicos: 0.32, industria: 0.12, outros: 0.16 },
+  // `outros` = atividades com serviços sem segregação de receitas: aplica-se o maior percentual (serviços).
+  presuncaoIrpj: { comercio: 0.08, servicos: 0.32, industria: 0.08, outros: 0.32 },
+  presuncaoCsll: { comercio: 0.12, servicos: 0.32, industria: 0.12, outros: 0.32 },
   real: { irpj: 0.15, adicionalIrpj: 0.1, limiteAdicional: 20000, csll: 0.09, pis: 0.0165, cofins: 0.076 },
   iss: { minimo: 0.02, padrao: 0.03, maximo: 0.05 },
   icmsPadrao: 0.12,
@@ -222,6 +223,8 @@ export const CREDITO_PISCOFINS_KEYS: (keyof Creditos)[] = [
 
 export const soma = (v: number[]) => v.reduce((a, b) => a + b, 0);
 export const mediaMensal = (v: number[]) => soma(v) / (v.filter((x) => x > 0).length || 1);
+/** Receita anual projetada: média dos meses informados × 12 (meses zerados contam como não informados). */
+export const receitaAnual = (v: number[]) => mediaMensal(v) * 12;
 export const totalFolha = (f: Folha) =>
   f.salarios + f.proLabore + f.inssPatronal + f.fgts + f.beneficios + f.encargos + f.outrasDespesasPessoal;
 export const totalCustos = (c: Custos) => soma(CUSTO_KEYS.map((k) => c[k]));
@@ -229,12 +232,12 @@ export const totalDespesas = (c: Custos) => soma(DESPESA_KEYS.map((k) => c[k]));
 export const baseCreditos = (c: Creditos) => soma(CREDITO_PISCOFINS_KEYS.map((k) => c[k]));
 
 export function fatorR(folha: Folha, fat: Faturamento) {
-  const r = soma(fat.meses);
+  const r = receitaAnual(fat.meses);
   return r === 0 ? 0 : totalFolha(folha) / r;
 }
 
 export function resultadoOperacional(fat: Faturamento, custos: Custos, folha: Folha) {
-  const receita = soma(fat.meses);
+  const receita = receitaAnual(fat.meses);
   const tc = totalCustos(custos);
   const td = totalDespesas(custos);
   const tf = totalFolha(folha);
@@ -258,6 +261,8 @@ export interface ResultadoSimples {
   dasMensal: number;
   dasAnual: number;
   cargaEfetiva: number;
+  /** Falso quando a receita anual ultrapassa o limite do Simples Nacional. */
+  elegivel: boolean;
 }
 
 export function anexoAplicavel(tipo: TipoAtividade, fr: number, cfg: TaxConfig): AnexoNome {
@@ -267,7 +272,7 @@ export function anexoAplicavel(tipo: TipoAtividade, fr: number, cfg: TaxConfig):
 }
 
 export function calcSimples(d: CompanyData, cfg: TaxConfig): ResultadoSimples {
-  const rbt12 = soma(d.faturamento.meses);
+  const rbt12 = receitaAnual(d.faturamento.meses);
   const anexo = anexoAplicavel(d.empresa.tipoAtividade, fatorR(d.folha, d.faturamento), cfg);
   const faixas = cfg.simples[anexo].faixas;
   let idx = faixas.length - 1;
@@ -291,7 +296,21 @@ export function calcSimples(d: CompanyData, cfg: TaxConfig): ResultadoSimples {
     dasMensal,
     dasAnual,
     cargaEfetiva: rbt12 > 0 ? dasAnual / rbt12 : 0,
+    elegivel: rbt12 <= cfg.simplesLimite,
   };
+}
+
+// ---------------- Tributos comuns a Presumido e Real ----------------
+
+/** INSS patronal mensal. A folha é informada em valores anuais. */
+function inssPatronalMensal(folha: Folha, cfg: TaxConfig) {
+  return ((folha.salarios + folha.proLabore) * cfg.inssPatronal) / 12;
+}
+
+/** ICMS mensal sobre vendas, descontado o crédito de ICMS das compras (informado em valor anual). */
+function icmsMensal(d: CompanyData, media: number, cfg: TaxConfig) {
+  if (!temICMS(d.empresa.tipoAtividade)) return 0;
+  return Math.max(0, media * cfg.icmsPadrao - d.creditos.icmsCompras / 12);
 }
 
 // ---------------- Lucro Presumido ----------------
@@ -315,13 +334,13 @@ export interface ResultadoPresumido {
 function presuncao(tipo: TipoAtividade, tabela: TaxConfig['presuncaoIrpj']) {
   if (tipo === 'Serviços') return tabela.servicos;
   if (tipo === 'Comércio') return tabela.comercio;
-  if (tipo === 'Indústria') return tabela.industria;
+  if (tipo === 'Indústria' || tipo === 'Indústria e Comércio') return tabela.industria;
   return tabela.outros;
 }
 
 export function calcPresumido(d: CompanyData, cfg: TaxConfig): ResultadoPresumido {
   const media = mediaMensal(d.faturamento.meses);
-  const receita = soma(d.faturamento.meses);
+  const receita = receitaAnual(d.faturamento.meses);
   const tipo = d.empresa.tipoAtividade;
   const p = cfg.presumido;
   const pIrpj = presuncao(tipo, cfg.presuncaoIrpj);
@@ -334,8 +353,8 @@ export function calcPresumido(d: CompanyData, cfg: TaxConfig): ResultadoPresumid
   const pisMensal = media * p.pis;
   const cofinsMensal = media * p.cofins;
   const issEstimado = temISS(tipo) ? media * cfg.iss.padrao : 0;
-  const icmsEstimado = temICMS(tipo) ? media * cfg.icmsPadrao : 0;
-  const inssPatronal = d.folha.salarios * cfg.inssPatronal + d.folha.proLabore * cfg.inssPatronal;
+  const icmsEstimado = icmsMensal(d, media, cfg);
+  const inssPatronal = inssPatronalMensal(d.folha, cfg);
   const totalMensal =
     irpjMensal + adicionalIrpjMensal + csllMensal + pisMensal + cofinsMensal + issEstimado + icmsEstimado + inssPatronal;
   const totalAnual = totalMensal * 12;
@@ -379,27 +398,30 @@ export interface ResultadoReal {
 
 export function calcReal(d: CompanyData, cfg: TaxConfig): ResultadoReal {
   const media = mediaMensal(d.faturamento.meses);
-  const receita = soma(d.faturamento.meses);
+  const receita = receitaAnual(d.faturamento.meses);
   const r = cfg.real;
+  const tipo = d.empresa.tipoAtividade;
+  // PIS/COFINS não cumulativos: crédito = base das compras × alíquota de cada tributo.
+  const pisMensal = media * r.pis;
+  const cofinsMensal = media * r.cofins;
+  const creditoBase = baseCreditos(d.creditos) / 12;
+  const creditosPis = creditoBase * r.pis;
+  const creditosCofins = creditoBase * r.cofins;
+  const pisLiquido = Math.max(0, pisMensal - creditosPis);
+  const cofinsLiquido = Math.max(0, cofinsMensal - creditosCofins);
+  const issEstimado = temISS(tipo) ? media * cfg.iss.padrao : 0;
+  const icmsEstimado = icmsMensal(d, media, cfg);
+  const inssPatronal = inssPatronalMensal(d.folha, cfg);
+  // Lucro sobre a receita líquida (sem os tributos sobre vendas). O INSS patronal já está na folha informada.
+  const receitaLiquida = media - pisLiquido - cofinsLiquido - issEstimado - icmsEstimado;
   const custosMes = totalCustos(d.custos) / 12;
   const despesasMes = totalDespesas(d.custos) / 12;
   const folhaMes = totalFolha(d.folha) / 12;
-  const lucroMensal = media - custosMes - despesasMes - folhaMes;
+  const lucroMensal = receitaLiquida - custosMes - despesasMes - folhaMes;
   const base = Math.max(0, lucroMensal);
   const irpjMensal = base * r.irpj;
   const adicionalIrpjMensal = Math.max(0, base - r.limiteAdicional) * r.adicionalIrpj;
   const csllMensal = base * r.csll;
-  const pisMensal = media * r.pis;
-  const cofinsMensal = media * r.cofins;
-  const creditoBase = baseCreditos(d.creditos) / 12;
-  const creditosPis = (creditoBase * r.pis) / (r.pis + r.cofins);
-  const creditosCofins = (creditoBase * r.cofins) / (r.pis + r.cofins);
-  const pisLiquido = Math.max(0, pisMensal - creditosPis);
-  const cofinsLiquido = Math.max(0, cofinsMensal - creditosCofins);
-  const tipo = d.empresa.tipoAtividade;
-  const issEstimado = temISS(tipo) ? media * cfg.iss.padrao : 0;
-  const icmsEstimado = temICMS(tipo) ? media * cfg.icmsPadrao : 0;
-  const inssPatronal = d.folha.salarios * cfg.inssPatronal + d.folha.proLabore * cfg.inssPatronal;
   const totalMensal =
     irpjMensal + adicionalIrpjMensal + csllMensal + pisLiquido + cofinsLiquido + issEstimado + icmsEstimado + inssPatronal;
   const totalAnual = totalMensal * 12;
@@ -426,7 +448,7 @@ export function calcReal(d: CompanyData, cfg: TaxConfig): ResultadoReal {
 // ---------------- Reforma Tributária (estimativa de referência) ----------------
 
 export function calcReforma(d: CompanyData, cfg: TaxConfig) {
-  const receita = soma(d.faturamento.meses);
+  const receita = receitaAnual(d.faturamento.meses);
   const aliq = cfg.reforma.cbs + cfg.reforma.ibs;
   const debito = receita * aliq;
   const credito = baseCreditos(d.creditos) * aliq;
@@ -454,6 +476,8 @@ export interface RegimeResumo {
   carga: number;
   color: string;
   page: string;
+  /** Falso quando a empresa não pode optar pelo regime (ex.: acima do limite do Simples). */
+  elegivel: boolean;
 }
 
 export const REGIME_COLORS: Record<Regime, string> = {
@@ -471,6 +495,7 @@ export function resumoRegimes(r: Resultados): RegimeResumo[] {
       carga: r.simples.cargaEfetiva,
       color: REGIME_COLORS['Simples Nacional'],
       page: 'simples-nacional',
+      elegivel: r.simples.elegivel,
     },
     {
       name: 'Lucro Presumido',
@@ -479,6 +504,7 @@ export function resumoRegimes(r: Resultados): RegimeResumo[] {
       carga: r.presumido.cargaTributaria,
       color: REGIME_COLORS['Lucro Presumido'],
       page: 'lucro-presumido',
+      elegivel: true,
     },
     {
       name: 'Lucro Real',
@@ -487,11 +513,13 @@ export function resumoRegimes(r: Resultados): RegimeResumo[] {
       carga: r.real.cargaTributaria,
       color: REGIME_COLORS['Lucro Real'],
       page: 'lucro-real',
+      elegivel: true,
     },
   ];
 }
 
-export const menorCarga = (rs: RegimeResumo[]) => rs.reduce((a, b) => (a.anual <= b.anual ? a : b));
+/** Regime elegível de menor custo anual. */
+export const menorCarga = (rs: RegimeResumo[]) => rs.filter((r) => r.elegivel).reduce((a, b) => (a.anual <= b.anual ? a : b));
 
 export function scaleData(d: CompanyData, v: { fat: number; folha: number; custos: number; creditos: number }): CompanyData {
   const m = (x: number) => 1 + x / 100;

@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowRight, CheckCircle2, DollarSign, Info, Target, Tren
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { MESES_CURTOS, kfmt, money, pct } from '../lib/format';
-import { fatorR, mediaMensal, menorCarga, resultadoOperacional, resumoRegimes, soma, totalFolha } from '../lib/tax';
+import { fatorR, mediaMensal, menorCarga, resultadoOperacional, resumoRegimes, receitaAnual, soma, totalFolha } from '../lib/tax';
 import { Card, CardTitle, ChartTooltip, Disclaimer, KV, Stat, axisTick, gridStroke, clsx } from '../components/ui';
 
 export default function Dashboard() {
@@ -14,7 +14,7 @@ export default function Dashboard() {
   const { empresa: c, faturamento, folha, custos } = data;
   const res = resultadoOperacional(faturamento, custos, folha);
   const fr = fatorR(folha, faturamento);
-  const receita = soma(faturamento.meses);
+  const receita = receitaAnual(faturamento.meses);
   const media = mediaMensal(faturamento.meses);
   const folhaTotal = totalFolha(folha);
   const regimes = resumoRegimes(results);
