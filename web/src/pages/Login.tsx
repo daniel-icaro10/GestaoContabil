@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { api } from '../lib/api';
 import { maskCpfCnpj } from '../lib/format';
 import { Alert, Button, Field, Input } from '../components/ui';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 export default function Login() {
   const { login, register, setup } = useAuth();
@@ -48,7 +49,8 @@ export default function Login() {
     setForm((f) => ({ ...f, [k]: k === 'document' ? maskCpfCnpj(e.target.value) : e.target.value }));
 
   return (
-    <div className="grid min-h-full lg:grid-cols-2">
+    <div className="relative grid min-h-full lg:grid-cols-2">
+      <ThemeToggle className="absolute right-4 top-4 z-10" />
       <div className="relative hidden overflow-hidden border-r border-line bg-surface lg:block">
         <div className="bg-grid absolute inset-0 [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]" />
         <div className="absolute left-1/2 top-1/3 h-96 w-96 -translate-x-1/2 rounded-full bg-accent/20 blur-3xl" />

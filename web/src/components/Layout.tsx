@@ -30,6 +30,7 @@ import { MODULES, modulePages, pageLabel } from '../lib/pages';
 import { dateBR, money } from '../lib/format';
 import { soma } from '../lib/tax';
 import { Badge } from './ui';
+import { ThemeToggle } from './ThemeToggle';
 
 const ADMIN_LINKS = [
   { to: '/admin', label: 'Visão Geral', icon: LayoutGrid, end: true },
@@ -367,6 +368,7 @@ export function Layout({ children, showCompany }: { children: ReactNode; showCom
         )}
         <div className="ml-auto flex items-center gap-1">
           {showCompany && <SaveIndicator />}
+          <ThemeToggle />
           <Notifications />
           <UserMenu />
         </div>
