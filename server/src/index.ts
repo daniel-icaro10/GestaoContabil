@@ -4,31 +4,32 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import cors from 'cors';
 import { ZodError } from 'zod';
 import { env } from './env.js';
-import { get, initDb, run } from './db.js';
+import { closeDb, get, initDb, run } from './db.js';
 import { HttpError } from './auth.js';
 import { appRouter } from './routes/app.js';
 import { adminRouter } from './routes/admin.js';
 import { CoraError } from './cora.js';
 import { handleWebhook, runBillingJobs } from './billing.js';
-import { getCoraConfig } from './settings.js';
+import { getCoraConfig, loadSettings } from './settings.js';
 import { announceSetup, needsSetup } from './setup.js';
 import { ensureDemoClient, ensurePresetAdmin } from './admin-seed.js';
 
 await initDb();
+await loadSettings();
 
 // Administrador pré-cadastrado; se não houver nenhum, o primeiro acesso cria pela tela /setup.
-ensurePresetAdmin();
-if (needsSetup()) announceSetup();
+await ensurePresetAdmin();
+if (await needsSetup()) await announceSetup();
 
 // Planos de exemplo.
-if (!get('SELECT id FROM plans LIMIT 1')) {
-  run('INSERT INTO plans (name, description, price_cents, interval_months) VALUES (?, ?, ?, ?)', [
+if (!(await get('SELECT id FROM plans LIMIT 1'))) {
+  await run('INSERT INTO plans (name, description, price_cents, interval_months) VALUES (?, ?, ?, ?)', [
     'Mensal',
     'Acesso completo ao diagnóstico tributário, cobrado mensalmente.',
     9900,
     1,
   ]);
-  run('INSERT INTO plans (name, description, price_cents, interval_months) VALUES (?, ?, ?, ?)', [
+  await run('INSERT INTO plans (name, description, price_cents, interval_months) VALUES (?, ?, ?, ?)', [
     'Anual',
     'Acesso completo por 12 meses com desconto.',
     99000,
@@ -36,7 +37,7 @@ if (!get('SELECT id FROM plans LIMIT 1')) {
   ]);
 }
 
-ensureDemoClient();
+await ensureDemoClient();
 
 const app = express();
 app.set('trust proxy', true);
@@ -85,3 +86,11 @@ app.listen(env.port, () => {
 // Sincronização de faturas e emissão de renovações a cada 30 minutos.
 setInterval(() => runBillingJobs().catch((e) => console.warn('[billing]', e.message)), 30 * 60_000);
 setTimeout(() => runBillingJobs().catch((e) => console.warn('[billing]', e.message)), 10_000);
+
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    closeDb()
+      .catch(() => undefined)
+      .finally(() => process.exit(0));
+  });
+}

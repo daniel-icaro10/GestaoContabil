@@ -1,0 +1,45 @@
+# PRODUÇÃO na VPS (Easypanel/Traefik nas portas 80/443).
+# O código fica em /opt/gestaocontabil; variáveis em /opt/gestaocontabil/.env.vps (chmod 600, fora do git).
+#   cd /opt/gestaocontabil && git pull && docker compose -f docker-compose.vps.yml --env-file .env.vps up -d --build
+# Sem domínio, abre em http://IP:3500. Com domínio: aponte-o no Easypanel para a porta 3500 do host.
+name: gestaocontabil
+
+services:
+  postgres:
+    image: postgres:16.15-alpine3.23
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gestaocontabil
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env.vps}
+      POSTGRES_DB: gestaocontabil
+      TZ: America/Sao_Paulo
+      PGTZ: America/Sao_Paulo
+    volumes:
+      - gestaocontabil-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gestaocontabil -d gestaocontabil"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    # sem "ports": o banco só é acessível pela rede interna
+
+  app:
+    build: .
+    image: gestaocontabil-app
+    restart: unless-stopped
+    ports:
+      - "3500:3333"
+    env_file:
+      - path: .env.vps
+        required: false
+    environment:
+      DATABASE_URL: postgres://gestaocontabil:${POSTGRES_PASSWORD}@postgres:5432/gestaocontabil
+    volumes:
+      # data/.secret (se APP_SECRET não for definido) sobrevive a deploys
+      - gestaocontabil-data:/data
+    depends_on:
+      postgres: { condition: service_healthy }
+
+volumes:
+  gestaocontabil-pg:
+  gestaocontabil-data:

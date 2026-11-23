@@ -1,177 +1,119 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import initSqlJs, { type Database, type SqlValue } from 'sql.js';
-import { DATA_DIR } from './env.js';
+import { fileURLToPath } from 'node:url';
+import pg from 'pg';
+import { env } from './env.js';
 
-const DB_FILE = path.join(DATA_DIR, 'app.sqlite');
+// PostgreSQL. As consultas usam `?` como marcador (convertido para $1, $2...) para manter o SQL legível.
 
-let db: Database;
-let saveTimer: NodeJS.Timeout | null = null;
+// Tipos devolvidos como valores JS simples: contagens/somas como número, datas como texto ISO.
+pg.types.setTypeParser(20, (v) => Number(v)); // int8 (COUNT, SUM de inteiros)
+pg.types.setTypeParser(1700, (v) => Number(v)); // numeric
+pg.types.setTypeParser(1082, (v) => v); // date → 'YYYY-MM-DD'
+pg.types.setTypeParser(1114, (v) => new Date(`${v.replace(' ', 'T')}Z`).toISOString()); // timestamp
+pg.types.setTypeParser(1184, (v) => new Date(v).toISOString()); // timestamptz
 
-type Value = SqlValue | boolean | undefined;
-type Params = Record<string, Value> | Value[];
+export const pool = new pg.Pool({ connectionString: env.databaseUrl, max: 10 });
+pool.on('error', (e) => console.error('[db] erro em conexão ociosa:', e.message));
 
-function normalize(params?: Params): any {
-  if (!params) return undefined;
-  if (Array.isArray(params)) return params.map((v) => (v === undefined ? null : typeof v === 'boolean' ? Number(v) : v));
-  const out: Record<string, SqlValue> = {};
-  for (const [k, v] of Object.entries(params)) {
-    out[k.startsWith('@') || k.startsWith(':') || k.startsWith('$') ? k : `@${k}`] =
-      v === undefined ? null : typeof v === 'boolean' ? Number(v) : v;
-  }
-  return out;
+type Value = string | number | boolean | null | undefined;
+type Params = Value[];
+
+function toPg(sql: string) {
+  let i = 0;
+  return sql.replace(/\?/g, () => `$${++i}`);
 }
 
-function persistNow() {
-  if (!db) return;
-  const tmp = DB_FILE + '.tmp';
-  fs.writeFileSync(tmp, Buffer.from(db.export()));
-  fs.renameSync(tmp, DB_FILE);
+function normalize(params?: Params) {
+  return (params ?? []).map((v) => (v === undefined ? null : typeof v === 'boolean' ? Number(v) : v));
 }
 
-function schedulePersist() {
-  if (saveTimer) return;
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    persistNow();
-  }, 150);
+export async function all<T = any>(sql: string, params?: Params): Promise<T[]> {
+  const r = await pool.query(toPg(sql), normalize(params));
+  return r.rows as T[];
 }
 
-export function all<T = any>(sql: string, params?: Params): T[] {
-  const stmt = db.prepare(sql);
+export async function get<T = any>(sql: string, params?: Params): Promise<T | undefined> {
+  return (await all<T>(sql, params))[0];
+}
+
+export async function run(sql: string, params?: Params): Promise<{ changes: number }> {
+  const r = await pool.query(toPg(sql), normalize(params));
+  return { changes: r.rowCount ?? 0 };
+}
+
+/** INSERT que devolve o id gerado. */
+export async function insert(sql: string, params?: Params): Promise<number> {
+  const r = await pool.query(`${toPg(sql)} RETURNING id`, normalize(params));
+  return Number(r.rows[0].id);
+}
+
+export interface TxClient {
+  all<T = any>(sql: string, params?: Params): Promise<T[]>;
+  get<T = any>(sql: string, params?: Params): Promise<T | undefined>;
+  run(sql: string, params?: Params): Promise<{ changes: number }>;
+}
+
+/** Executa `fn` numa transação (COMMIT no sucesso, ROLLBACK em erro). */
+export async function tx<T>(fn: (c: TxClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  const c: TxClient = {
+    all: async (sql, params) => (await client.query(toPg(sql), normalize(params))).rows,
+    get: async (sql, params) => (await client.query(toPg(sql), normalize(params))).rows[0],
+    run: async (sql, params) => ({ changes: (await client.query(toPg(sql), normalize(params))).rowCount ?? 0 }),
+  };
   try {
-    stmt.bind(normalize(params));
-    const rows: T[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as T);
-    return rows;
-  } finally {
-    stmt.free();
-  }
-}
-
-export function get<T = any>(sql: string, params?: Params): T | undefined {
-  return all<T>(sql, params)[0];
-}
-
-export function run(sql: string, params?: Params): { lastId: number; changes: number } {
-  db.run(sql, normalize(params));
-  const lastId = Number(db.exec('SELECT last_insert_rowid()')[0]?.values[0][0] ?? 0);
-  const changes = db.getRowsModified();
-  schedulePersist();
-  return { lastId, changes };
-}
-
-export function tx<T>(fn: () => T): T {
-  db.run('BEGIN');
-  try {
-    const r = fn();
-    db.run('COMMIT');
-    schedulePersist();
+    await client.query('BEGIN');
+    const r = await fn(c);
+    await client.query('COMMIT');
     return r;
   } catch (e) {
-    db.run('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => undefined);
     throw e;
+  } finally {
+    client.release();
   }
 }
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  email TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'user',
-  active INTEGER NOT NULL DEFAULT 1,
-  permissions TEXT NOT NULL DEFAULT '[]',
-  document TEXT,
-  phone TEXT,
-  tax_config TEXT,
-  current_company_id INTEGER,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS companies (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  data TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS settings (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS plans (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  description TEXT NOT NULL DEFAULT '',
-  price_cents INTEGER NOT NULL,
-  interval_months INTEGER NOT NULL DEFAULT 1,
-  active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS subscriptions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-  plan_id INTEGER NOT NULL REFERENCES plans(id),
-  status TEXT NOT NULL DEFAULT 'pending',
-  current_period_end TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS invoices (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  subscription_id INTEGER REFERENCES subscriptions(id) ON DELETE SET NULL,
-  plan_id INTEGER REFERENCES plans(id),
-  cora_id TEXT UNIQUE,
-  code TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'OPEN',
-  amount_cents INTEGER NOT NULL,
-  period_months INTEGER NOT NULL DEFAULT 1,
-  due_date TEXT NOT NULL,
-  boleto_url TEXT,
-  digitable TEXT,
-  barcode TEXT,
-  pix_emv TEXT,
-  paid_at TEXT,
-  applied INTEGER NOT NULL DEFAULT 0,
-  manual INTEGER NOT NULL DEFAULT 0,
-  error TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS webhook_events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  event_id TEXT,
-  event_type TEXT,
-  resource_id TEXT,
-  received_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_companies_user ON companies(user_id);
-CREATE INDEX IF NOT EXISTS idx_invoices_user ON invoices(user_id);
-CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
-`;
+// ---------------- Migrações ----------------
+// Arquivos .sql em src/migrations, aplicados em ordem alfabética, uma única vez cada.
+
+const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations');
 
 export async function initDb() {
-  const SQL = await initSqlJs();
-  db = fs.existsSync(DB_FILE) ? new SQL.Database(fs.readFileSync(DB_FILE)) : new SQL.Database();
-  db.run('PRAGMA foreign_keys = ON');
-  db.exec(SCHEMA);
-  // Migrações de colunas adicionadas depois da criação das tabelas.
-  const cols = all<{ name: string }>('PRAGMA table_info(plans)').map((c) => c.name);
-  // Módulos liberados pelo plano (JSON). NULL = todos os módulos.
-  if (!cols.includes('modules')) db.run('ALTER TABLE plans ADD COLUMN modules TEXT');
-  persistNow();
-
-  const flush = () => {
-    if (saveTimer) clearTimeout(saveTimer);
-    persistNow();
-  };
-  process.on('exit', flush);
-  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
-    process.on(sig, () => {
-      flush();
-      process.exit(0);
-    });
+  const client = await pool.connect();
+  try {
+    // Impede que duas instâncias apliquem migrações ao mesmo tempo.
+    await client.query('SELECT pg_advisory_lock(727001)');
+    await client.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
+      name TEXT PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`);
+    const done = new Set((await client.query('SELECT name FROM schema_migrations')).rows.map((r) => r.name));
+    const files = fs
+      .readdirSync(MIGRATIONS_DIR)
+      .filter((f) => f.endsWith('.sql'))
+      .sort();
+    for (const file of files) {
+      if (done.has(file)) continue;
+      const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
+      await client.query('BEGIN');
+      try {
+        await client.query(sql);
+        await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [file]);
+        await client.query('COMMIT');
+        console.log(`[db] migração aplicada: ${file}`);
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw new Error(`Falha na migração ${file}: ${(e as Error).message}`);
+      }
+    }
+  } finally {
+    await client.query('SELECT pg_advisory_unlock(727001)').catch(() => undefined);
+    client.release();
   }
+}
+
+export async function closeDb() {
+  await pool.end();
 }

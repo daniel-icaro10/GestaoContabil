@@ -1,4 +1,4 @@
-import { all, get, run } from './db.js';
+import { all, get, insert, run, tx } from './db.js';
 import { cora, CoraError, type CoraInvoice } from './cora.js';
 import { MODULE_IDS, getSettings, isCoraConfigured, toModules, type ModuleId } from './settings.js';
 
@@ -73,7 +73,7 @@ export function ymd(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-export function getSubscription(userId: number) {
+export function getSubscription(userId: number): Promise<Subscription | undefined> {
   return get<Subscription>('SELECT * FROM subscriptions WHERE user_id = ?', [userId]);
 }
 
@@ -89,23 +89,23 @@ export function subscriptionState(sub: Subscription | undefined): AccessState {
   return 'expired';
 }
 
-export function hasAccess(user: { id: number; role: string }) {
+export async function hasAccess(user: { id: number; role: string }) {
   if (user.role === 'admin') return true;
   if (!getSettings().requireSubscription) return true;
-  const state = subscriptionState(getSubscription(user.id));
+  const state = subscriptionState(await getSubscription(user.id));
   return state === 'active' || state === 'grace';
 }
 
 /** Módulos do plano da assinatura, enquanto ela estiver ativa (ou na tolerância). */
-export function subscriptionModules(userId: number): ModuleId[] {
-  const sub = getSubscription(userId);
+export async function subscriptionModules(userId: number): Promise<ModuleId[]> {
+  const sub = await getSubscription(userId);
   const state = subscriptionState(sub);
   if (state !== 'active' && state !== 'grace') return [];
-  const plan = get<Plan>('SELECT * FROM plans WHERE id = ?', [sub!.plan_id]);
+  const plan = await get<Plan>('SELECT * FROM plans WHERE id = ?', [sub!.plan_id]);
   return plan ? planModules(plan) : [];
 }
 
-export function openInvoiceFor(userId: number) {
+export function openInvoiceFor(userId: number): Promise<Invoice | undefined> {
   return get<Invoice>(
     `SELECT * FROM invoices WHERE user_id = ? AND applied = 0 AND status IN (${OPEN_STATUSES.map(() => '?').join(',')})
      ORDER BY id DESC LIMIT 1`,
@@ -113,19 +113,19 @@ export function openInvoiceFor(userId: number) {
   );
 }
 
-function updateFromCora(invoiceId: number, inv: CoraInvoice) {
-  run(
-    `UPDATE invoices SET cora_id = @cora_id, status = @status, boleto_url = @boleto_url, digitable = @digitable,
-       barcode = @barcode, pix_emv = @pix_emv, error = NULL, updated_at = datetime('now') WHERE id = @id`,
-    {
-      id: invoiceId,
-      cora_id: inv.id,
-      status: inv.status,
-      boleto_url: inv.payment_options?.bank_slip?.url ?? null,
-      digitable: inv.payment_options?.bank_slip?.digitable ?? null,
-      barcode: inv.payment_options?.bank_slip?.barcode ?? null,
-      pix_emv: inv.pix?.emv ?? null,
-    },
+async function updateFromCora(invoiceId: number, inv: CoraInvoice) {
+  await run(
+    `UPDATE invoices SET cora_id = ?, status = ?, boleto_url = ?, digitable = ?,
+       barcode = ?, pix_emv = ?, error = NULL, updated_at = now() WHERE id = ?`,
+    [
+      inv.id,
+      inv.status,
+      inv.payment_options?.bank_slip?.url ?? null,
+      inv.payment_options?.bank_slip?.digitable ?? null,
+      inv.payment_options?.bank_slip?.barcode ?? null,
+      inv.pix?.emv ?? null,
+      invoiceId,
+    ],
   );
 }
 
@@ -144,9 +144,9 @@ export async function issueInvoice(userId: number, planId: number, opts: { dueDa
 }
 
 async function emitInvoice(userId: number, planId: number, opts: { dueDate?: string }) {
-  const plan = get<Plan>('SELECT * FROM plans WHERE id = ?', [planId]);
+  const plan = await get<Plan>('SELECT * FROM plans WHERE id = ?', [planId]);
   if (!plan) throw new CoraError('Plano não encontrado', 404);
-  const user = get<{ id: number; name: string; email: string; document: string | null }>(
+  const user = await get<{ id: number; name: string; email: string; document: string | null }>(
     'SELECT id, name, email, document FROM users WHERE id = ?',
     [userId],
   );
@@ -158,16 +158,16 @@ async function emitInvoice(userId: number, planId: number, opts: { dueDate?: str
   if (!isCoraConfigured()) throw new CoraError('Pagamentos indisponíveis: integração Cora ainda não configurada pelo administrador.', 503);
 
   const settings = getSettings();
-  let sub = getSubscription(userId);
+  let sub = await getSubscription(userId);
   if (!sub) {
-    run('INSERT INTO subscriptions (user_id, plan_id, status) VALUES (?, ?, ?)', [userId, planId, 'pending']);
-    sub = getSubscription(userId)!;
+    await run('INSERT INTO subscriptions (user_id, plan_id, status) VALUES (?, ?, ?)', [userId, planId, 'pending']);
+    sub = (await getSubscription(userId))!;
   } else if (sub.plan_id !== planId) {
-    run(`UPDATE subscriptions SET plan_id = ?, updated_at = datetime('now') WHERE id = ?`, [planId, sub.id]);
+    await run(`UPDATE subscriptions SET plan_id = ?, updated_at = now() WHERE id = ?`, [planId, sub.id]);
   }
 
   // Cancela faturas em aberto anteriores (ex.: troca de plano) para não haver duas cobranças.
-  for (const old of all<Invoice>(
+  for (const old of await all<Invoice>(
     `SELECT * FROM invoices WHERE user_id = ? AND applied = 0 AND status IN (${OPEN_STATUSES.map(() => '?').join(',')})`,
     [userId, ...OPEN_STATUSES],
   )) {
@@ -176,7 +176,7 @@ async function emitInvoice(userId: number, planId: number, opts: { dueDate?: str
 
   const due = opts.dueDate ?? ymd(new Date(Date.now() + Math.max(1, settings.dueDays) * DAY));
   const code = `sub-${userId}-${Date.now()}`;
-  const { lastId } = run(
+  const lastId = await insert(
     `INSERT INTO invoices (user_id, subscription_id, plan_id, code, status, amount_cents, period_months, due_date)
      VALUES (?, ?, ?, ?, 'PENDING', ?, ?, ?)`,
     [userId, sub.id, plan.id, code, plan.price_cents, plan.interval_months, due],
@@ -194,54 +194,54 @@ async function emitInvoice(userId: number, planId: number, opts: { dueDate?: str
       interestPercent: settings.interestPercent,
       paymentForms: settings.paymentForms,
     });
-    updateFromCora(lastId, inv);
+    await updateFromCora(lastId, inv);
   } catch (e: any) {
-    run(`UPDATE invoices SET status = 'ERROR', error = ?, updated_at = datetime('now') WHERE id = ?`, [
+    await run(`UPDATE invoices SET status = 'ERROR', error = ?, updated_at = now() WHERE id = ?`, [
       String(e?.message ?? e),
       lastId,
     ]);
     throw e;
   }
-  return get<Invoice>('SELECT * FROM invoices WHERE id = ?', [lastId])!;
+  return (await get<Invoice>('SELECT * FROM invoices WHERE id = ?', [lastId]))!;
 }
 
 /** Credita o período pago na assinatura (idempotente). */
-export function applyPayment(invoice: Invoice, paidAt = new Date().toISOString()) {
-  const fresh = get<Invoice>('SELECT * FROM invoices WHERE id = ?', [invoice.id]);
-  if (!fresh || fresh.applied) return;
-  let sub = getSubscription(fresh.user_id);
-  if (!sub) {
-    run('INSERT INTO subscriptions (user_id, plan_id, status) VALUES (?, ?, ?)', [
-      fresh.user_id,
-      fresh.plan_id,
-      'pending',
+export async function applyPayment(invoice: Invoice, paidAt = new Date().toISOString()) {
+  // Transação com bloqueio da fatura: webhook e rotina periódica podem confirmar o mesmo pagamento ao mesmo
+  // tempo, e só um deles pode creditar o período.
+  await tx(async (c) => {
+    const fresh = await c.get<Invoice>('SELECT * FROM invoices WHERE id = ? FOR UPDATE', [invoice.id]);
+    if (!fresh || fresh.applied) return;
+    await c.run(
+      `INSERT INTO subscriptions (user_id, plan_id, status) VALUES (?, ?, 'pending') ON CONFLICT (user_id) DO NOTHING`,
+      [fresh.user_id, fresh.plan_id],
+    );
+    const sub = (await c.get<Subscription>('SELECT * FROM subscriptions WHERE user_id = ? FOR UPDATE', [fresh.user_id]))!;
+    const now = new Date();
+    const currentEnd = sub.current_period_end ? new Date(sub.current_period_end) : null;
+    const base = currentEnd && currentEnd > now ? currentEnd : now;
+    const newEnd = addMonths(base, fresh.period_months || 1);
+    await c.run(`UPDATE subscriptions SET status = 'active', current_period_end = ?, updated_at = now() WHERE id = ?`, [
+      newEnd.toISOString(),
+      sub.id,
     ]);
-    sub = getSubscription(fresh.user_id)!;
-  }
-  const now = new Date();
-  const currentEnd = sub.current_period_end ? new Date(sub.current_period_end) : null;
-  const base = currentEnd && currentEnd > now ? currentEnd : now;
-  const newEnd = addMonths(base, fresh.period_months || 1);
-  run(
-    `UPDATE subscriptions SET status = 'active', current_period_end = ?, updated_at = datetime('now') WHERE id = ?`,
-    [newEnd.toISOString(), sub.id],
-  );
-  run(
-    `UPDATE invoices SET status = 'PAID', applied = 1, paid_at = COALESCE(paid_at, ?), updated_at = datetime('now') WHERE id = ?`,
-    [paidAt, fresh.id],
-  );
+    await c.run(
+      `UPDATE invoices SET status = 'PAID', applied = 1, paid_at = COALESCE(paid_at, ?), updated_at = now() WHERE id = ?`,
+      [paidAt, fresh.id],
+    );
+  });
 }
 
 /** Consulta a fatura na Cora e aplica o pagamento quando confirmado. */
 export async function syncInvoice(invoice: Invoice) {
   if (!invoice.cora_id) return invoice;
   const inv = await cora.getInvoice(invoice.cora_id);
-  updateFromCora(invoice.id, inv);
+  await updateFromCora(invoice.id, inv);
   if (inv.status === 'PAID') {
     const paidAt = inv.payments?.find((p) => p.finalized_at)?.finalized_at ?? inv.occurrence_date ?? undefined;
-    applyPayment(invoice, paidAt ? new Date(paidAt).toISOString() : undefined);
+    await applyPayment(invoice, paidAt ? new Date(paidAt).toISOString() : undefined);
   }
-  return get<Invoice>('SELECT * FROM invoices WHERE id = ?', [invoice.id])!;
+  return (await get<Invoice>('SELECT * FROM invoices WHERE id = ?', [invoice.id]))!;
 }
 
 export async function cancelInvoice(invoice: Invoice) {
@@ -249,17 +249,17 @@ export async function cancelInvoice(invoice: Invoice) {
   if (invoice.cora_id && OPEN_STATUSES.includes(invoice.status)) {
     await cora.cancelInvoice(invoice.cora_id);
   }
-  run(`UPDATE invoices SET status = 'CANCELLED', updated_at = datetime('now') WHERE id = ?`, [invoice.id]);
+  await run(`UPDATE invoices SET status = 'CANCELLED', updated_at = now() WHERE id = ?`, [invoice.id]);
 }
 
 export async function handleWebhook(resourceId: string, eventType: string, eventId?: string) {
-  run('INSERT INTO webhook_events (event_id, event_type, resource_id) VALUES (?, ?, ?)', [
+  await run('INSERT INTO webhook_events (event_id, event_type, resource_id) VALUES (?, ?, ?)', [
     eventId ?? null,
     eventType ?? null,
     resourceId ?? null,
   ]);
   if (!resourceId) return;
-  const invoice = get<Invoice>('SELECT * FROM invoices WHERE cora_id = ?', [resourceId]);
+  const invoice = await get<Invoice>('SELECT * FROM invoices WHERE cora_id = ?', [resourceId]);
   if (!invoice) return;
   // Nunca confiamos no cabeçalho do webhook: o status é sempre confirmado direto na API da Cora.
   await syncInvoice(invoice);
@@ -272,7 +272,7 @@ export async function runBillingJobs() {
   if (jobRunning || !isCoraConfigured()) return;
   jobRunning = true;
   try {
-    const open = all<Invoice>(
+    const open = await all<Invoice>(
       `SELECT * FROM invoices WHERE applied = 0 AND cora_id IS NOT NULL AND status IN (${OPEN_STATUSES.map(() => '?').join(',')})`,
       OPEN_STATUSES,
     );
@@ -282,14 +282,14 @@ export async function runBillingJobs() {
 
     const settings = getSettings();
     const horizon = new Date(Date.now() + settings.renewalLeadDays * DAY).toISOString();
-    const due = all<Subscription & { plan_active: number }>(
+    const due = await all<Subscription & { plan_active: number }>(
       `SELECT s.*, p.active AS plan_active FROM subscriptions s JOIN plans p ON p.id = s.plan_id
        JOIN users u ON u.id = s.user_id
        WHERE s.status != 'canceled' AND u.active = 1 AND s.current_period_end IS NOT NULL AND s.current_period_end <= ?`,
       [horizon],
     );
     for (const sub of due) {
-      if (!sub.plan_active || openInvoiceFor(sub.user_id)) continue;
+      if (!sub.plan_active || (await openInvoiceFor(sub.user_id))) continue;
       const end = new Date(sub.current_period_end!);
       // Não reemite automaticamente para assinaturas já expiradas além da tolerância.
       if (end.getTime() + settings.graceDays * DAY < Date.now()) continue;
@@ -299,8 +299,8 @@ export async function runBillingJobs() {
       );
     }
 
-    run(
-      `UPDATE subscriptions SET status = 'expired', updated_at = datetime('now')
+    await run(
+      `UPDATE subscriptions SET status = 'expired', updated_at = now()
        WHERE status = 'active' AND current_period_end < ?`,
       [new Date(Date.now() - settings.graceDays * DAY).toISOString()],
     );

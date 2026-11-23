@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { all, get, run } from '../db.js';
+import { all, get, insert, run } from '../db.js';
 import {
   HttpError,
   publicUser,
@@ -35,14 +35,14 @@ const document = z
   .trim()
   .refine((v) => !v || [11, 14].includes(v.replace(/\D/g, '').length), 'CPF/CNPJ inválido');
 
-function sessionPayload(user: UserRow) {
+async function sessionPayload(user: UserRow) {
   const settings = getSettings();
-  const sub = getSubscription(user.id);
-  const plan = sub ? get<Plan>('SELECT * FROM plans WHERE id = ?', [sub.plan_id]) : undefined;
+  const sub = await getSubscription(user.id);
+  const plan = sub ? await get<Plan>('SELECT * FROM plans WHERE id = ?', [sub.plan_id]) : undefined;
   return {
-    user: publicUser(user),
+    user: await publicUser(user),
     access: {
-      hasAccess: hasAccess(user),
+      hasAccess: await hasAccess(user),
       requireSubscription: settings.requireSubscription && user.role !== 'admin',
       state: subscriptionState(sub),
       periodEnd: sub?.current_period_end ?? null,
@@ -53,17 +53,17 @@ function sessionPayload(user: UserRow) {
 
 // ---------------- Autenticação ----------------
 
-appRouter.get('/auth/config', (_req, res) => {
-  res.json({ allowSignup: getSettings().allowSignup, needsSetup: needsSetup() });
+appRouter.get('/auth/config', async (_req, res) => {
+  res.json({ allowSignup: getSettings().allowSignup, needsSetup: await needsSetup() });
 });
 
 // Configuração inicial: cria o primeiro administrador. Disponível apenas enquanto não houver admin.
-appRouter.post('/auth/setup', (req, res) => {
-  if (!needsSetup()) throw new HttpError(409, 'O sistema já foi configurado.');
+appRouter.post('/auth/setup', async (req, res) => {
+  if (!(await needsSetup())) throw new HttpError(409, 'O sistema já foi configurado.');
   const body = z
     .object({ name: z.string().trim().min(2, 'Informe seu nome'), email, password: z.string().min(8, 'A senha do administrador deve ter ao menos 8 caracteres') })
     .parse(req.body);
-  const { lastId } = run('INSERT INTO users (name, email, password_hash, role, permissions) VALUES (?, ?, ?, ?, ?)', [
+  const lastId = await insert('INSERT INTO users (name, email, password_hash, role, permissions) VALUES (?, ?, ?, ?, ?)', [
     body.name,
     body.email,
     bcrypt.hashSync(body.password, 10),
@@ -71,19 +71,19 @@ appRouter.post('/auth/setup', (req, res) => {
     JSON.stringify(MODULE_IDS),
   ]);
   console.log(`[setup] Administrador criado: ${body.email}`);
-  const user = get<UserRow>('SELECT * FROM users WHERE id = ?', [lastId])!;
-  res.status(201).json({ token: signToken(user), ...sessionPayload(user) });
+  const user = (await get<UserRow>('SELECT * FROM users WHERE id = ?', [lastId]))!;
+  res.status(201).json({ token: signToken(user), ...(await sessionPayload(user)) });
 });
 
-appRouter.post('/auth/register', (req, res) => {
-  if (needsSetup()) throw new HttpError(403, 'O sistema ainda não foi configurado pelo administrador.');
+appRouter.post('/auth/register', async (req, res) => {
+  if (await needsSetup()) throw new HttpError(403, 'O sistema ainda não foi configurado pelo administrador.');
   const settings = getSettings();
   if (!settings.allowSignup) throw new HttpError(403, 'Cadastro desabilitado. Solicite acesso ao administrador.');
   const body = z
     .object({ name: z.string().trim().min(2, 'Informe seu nome'), email, password, document: document.optional() })
     .parse(req.body);
-  if (get('SELECT id FROM users WHERE email = ?', [body.email])) throw new HttpError(409, 'E-mail já cadastrado');
-  const { lastId } = run(
+  if (await get('SELECT id FROM users WHERE email = ?', [body.email])) throw new HttpError(409, 'E-mail já cadastrado');
+  const lastId = await insert(
     'INSERT INTO users (name, email, password_hash, role, permissions, document) VALUES (?, ?, ?, ?, ?, ?)',
     [
       body.name,
@@ -94,25 +94,25 @@ appRouter.post('/auth/register', (req, res) => {
       body.document?.replace(/\D/g, '') || null,
     ],
   );
-  const user = get<UserRow>('SELECT * FROM users WHERE id = ?', [lastId])!;
-  res.status(201).json({ token: signToken(user), ...sessionPayload(user) });
+  const user = (await get<UserRow>('SELECT * FROM users WHERE id = ?', [lastId]))!;
+  res.status(201).json({ token: signToken(user), ...(await sessionPayload(user)) });
 });
 
-appRouter.post('/auth/login', (req, res) => {
+appRouter.post('/auth/login', async (req, res) => {
   const body = z.object({ email, password: z.string().min(1) }).parse(req.body);
-  const user = get<UserRow>('SELECT * FROM users WHERE email = ?', [body.email]);
+  const user = await get<UserRow>('SELECT * FROM users WHERE email = ?', [body.email]);
   if (!user || !bcrypt.compareSync(body.password, user.password_hash)) {
     throw new HttpError(401, 'E-mail ou senha incorretos');
   }
   if (!user.active) throw new HttpError(403, 'Usuário desativado. Contate o administrador.');
-  res.json({ token: signToken(user), ...sessionPayload(user) });
+  res.json({ token: signToken(user), ...(await sessionPayload(user)) });
 });
 
-appRouter.get('/auth/me', requireAuth, (req, res) => {
-  res.json(sessionPayload(req.user!));
+appRouter.get('/auth/me', requireAuth, async (req, res) => {
+  res.json(await sessionPayload(req.user!));
 });
 
-appRouter.put('/auth/profile', requireAuth, (req, res) => {
+appRouter.put('/auth/profile', requireAuth, async (req, res) => {
   const body = z
     .object({
       name: z.string().trim().min(2),
@@ -127,15 +127,15 @@ appRouter.put('/auth/profile', requireAuth, (req, res) => {
     if (!body.currentPassword || !bcrypt.compareSync(body.currentPassword, user.password_hash)) {
       throw new HttpError(400, 'Senha atual incorreta');
     }
-    run('UPDATE users SET password_hash = ? WHERE id = ?', [bcrypt.hashSync(body.newPassword, 10), user.id]);
+    await run('UPDATE users SET password_hash = ? WHERE id = ?', [bcrypt.hashSync(body.newPassword, 10), user.id]);
   }
-  run('UPDATE users SET name = ?, document = ?, phone = ? WHERE id = ?', [
+  await run('UPDATE users SET name = ?, document = ?, phone = ? WHERE id = ?', [
     body.name,
     body.document.replace(/\D/g, '') || null,
     body.phone || null,
     user.id,
   ]);
-  res.json(sessionPayload(get<UserRow>('SELECT * FROM users WHERE id = ?', [user.id])!));
+  res.json(await sessionPayload((await get<UserRow>('SELECT * FROM users WHERE id = ?', [user.id]))!));
 });
 
 // ---------------- Empresas e análises ----------------
@@ -154,8 +154,8 @@ function serializeCompany(row: { id: number; data: string; created_at: string; u
   return { id: row.id, ...JSON.parse(row.data), createdAt: row.created_at, updatedAt: row.updated_at };
 }
 
-function ownCompany(userId: number, id: number) {
-  const row = get<{ id: number; data: string; created_at: string; updated_at: string }>(
+async function ownCompany(userId: number, id: number) {
+  const row = await get<{ id: number; data: string; created_at: string; updated_at: string }>(
     'SELECT * FROM companies WHERE id = ? AND user_id = ?',
     [id, userId],
   );
@@ -163,108 +163,108 @@ function ownCompany(userId: number, id: number) {
   return row;
 }
 
-appRouter.get('/companies', requireAuth, requireSubscription, anyModule, (req, res) => {
-  const rows = all('SELECT * FROM companies WHERE user_id = ? ORDER BY updated_at DESC', [req.user!.id]);
+appRouter.get('/companies', requireAuth, requireSubscription, anyModule, async (req, res) => {
+  const rows = await all('SELECT * FROM companies WHERE user_id = ? ORDER BY updated_at DESC', [req.user!.id]);
   res.json(rows.map(serializeCompany));
 });
 
-appRouter.post('/companies', requireAuth, requireSubscription, anyModule, (req, res) => {
+appRouter.post('/companies', requireAuth, requireSubscription, anyModule, async (req, res) => {
   // Sem o módulo Principal só é permitido criar a análise inicial (quando o usuário não tem nenhuma empresa).
-  const hasCompany = get('SELECT id FROM companies WHERE user_id = ? LIMIT 1', [req.user!.id]);
-  if (hasCompany && !userModules(req.user!).includes('principal')) {
+  const hasCompany = await get('SELECT id FROM companies WHERE user_id = ? LIMIT 1', [req.user!.id]);
+  if (hasCompany && !(await userModules(req.user!)).includes('principal')) {
     throw new HttpError(403, 'Você não tem permissão para cadastrar empresas.');
   }
   const data = companyData.parse(req.body);
-  const { lastId } = run('INSERT INTO companies (user_id, data) VALUES (?, ?)', [req.user!.id, JSON.stringify(data)]);
-  run('UPDATE users SET current_company_id = ? WHERE id = ?', [lastId, req.user!.id]);
-  res.status(201).json(serializeCompany(ownCompany(req.user!.id, lastId)));
+  const lastId = await insert('INSERT INTO companies (user_id, data) VALUES (?, ?)', [req.user!.id, JSON.stringify(data)]);
+  await run('UPDATE users SET current_company_id = ? WHERE id = ?', [lastId, req.user!.id]);
+  res.status(201).json(serializeCompany(await ownCompany(req.user!.id, lastId)));
 });
 
-appRouter.put('/companies/:id', requireAuth, requireSubscription, requireModule('principal', 'dados-financeiros'), (req, res) => {
+appRouter.put('/companies/:id', requireAuth, requireSubscription, requireModule('principal', 'dados-financeiros'), async (req, res) => {
   const id = Number(req.params.id);
-  ownCompany(req.user!.id, id);
+  await ownCompany(req.user!.id, id);
   const data = companyData.parse(req.body);
-  run(`UPDATE companies SET data = ?, updated_at = datetime('now') WHERE id = ?`, [JSON.stringify(data), id]);
-  res.json(serializeCompany(ownCompany(req.user!.id, id)));
+  await run(`UPDATE companies SET data = ?, updated_at = now() WHERE id = ?`, [JSON.stringify(data), id]);
+  res.json(serializeCompany(await ownCompany(req.user!.id, id)));
 });
 
-appRouter.delete('/companies/:id', requireAuth, requireSubscription, requireModule('principal'), (req, res) => {
+appRouter.delete('/companies/:id', requireAuth, requireSubscription, requireModule('principal'), async (req, res) => {
   const id = Number(req.params.id);
-  ownCompany(req.user!.id, id);
-  run('DELETE FROM companies WHERE id = ?', [id]);
-  if (req.user!.current_company_id === id) run('UPDATE users SET current_company_id = NULL WHERE id = ?', [req.user!.id]);
+  await ownCompany(req.user!.id, id);
+  await run('DELETE FROM companies WHERE id = ?', [id]);
+  if (req.user!.current_company_id === id) await run('UPDATE users SET current_company_id = NULL WHERE id = ?', [req.user!.id]);
   res.status(204).end();
 });
 
-appRouter.put('/companies/:id/select', requireAuth, requireSubscription, anyModule, (req, res) => {
+appRouter.put('/companies/:id/select', requireAuth, requireSubscription, anyModule, async (req, res) => {
   const id = Number(req.params.id);
-  ownCompany(req.user!.id, id);
-  run('UPDATE users SET current_company_id = ? WHERE id = ?', [id, req.user!.id]);
+  await ownCompany(req.user!.id, id);
+  await run('UPDATE users SET current_company_id = ? WHERE id = ?', [id, req.user!.id]);
   res.status(204).end();
 });
 
 // ---------------- Configurações tributárias do usuário ----------------
 
-appRouter.get('/tax-config', requireAuth, requireSubscription, anyModule, (req, res) => {
+appRouter.get('/tax-config', requireAuth, requireSubscription, anyModule, async (req, res) => {
   res.json(req.user!.tax_config ? JSON.parse(req.user!.tax_config) : null);
 });
 
-appRouter.put('/tax-config', requireAuth, requireSubscription, requireModule('configuracoes'), (req, res) => {
+appRouter.put('/tax-config', requireAuth, requireSubscription, requireModule('configuracoes'), async (req, res) => {
   const body = z.record(z.string(), z.any()).parse(req.body);
-  run('UPDATE users SET tax_config = ? WHERE id = ?', [JSON.stringify(body), req.user!.id]);
+  await run('UPDATE users SET tax_config = ? WHERE id = ?', [JSON.stringify(body), req.user!.id]);
   res.json(body);
 });
 
 // Restaura os parâmetros padrão.
-appRouter.delete('/tax-config', requireAuth, requireSubscription, requireModule('configuracoes'), (req, res) => {
-  run('UPDATE users SET tax_config = NULL WHERE id = ?', [req.user!.id]);
+appRouter.delete('/tax-config', requireAuth, requireSubscription, requireModule('configuracoes'), async (req, res) => {
+  await run('UPDATE users SET tax_config = NULL WHERE id = ?', [req.user!.id]);
   res.status(204).end();
 });
 
 // ---------------- Assinatura ----------------
 
-appRouter.get('/billing/plans', requireAuth, (_req, res) => {
-  res.json(all<Plan>('SELECT * FROM plans WHERE active = 1 ORDER BY price_cents').map((p) => ({ ...p, modules: planModules(p) })));
+appRouter.get('/billing/plans', requireAuth, async (_req, res) => {
+  res.json((await all<Plan>('SELECT * FROM plans WHERE active = 1 ORDER BY price_cents')).map((p) => ({ ...p, modules: planModules(p) })));
 });
 
-appRouter.get('/billing/me', requireAuth, (req, res) => {
+appRouter.get('/billing/me', requireAuth, async (req, res) => {
   const user = req.user!;
-  const sub = getSubscription(user.id);
+  const sub = await getSubscription(user.id);
   res.json({
     paymentsEnabled: isCoraConfigured(),
     subscription: sub
       ? {
           ...sub,
           state: subscriptionState(sub),
-          plan: get<Plan>('SELECT * FROM plans WHERE id = ?', [sub.plan_id]) ?? null,
+          plan: (await get<Plan>('SELECT * FROM plans WHERE id = ?', [sub.plan_id])) ?? null,
         }
       : null,
-    invoices: all<Invoice>('SELECT * FROM invoices WHERE user_id = ? ORDER BY id DESC LIMIT 50', [user.id]),
-    ...sessionPayload(user),
+    invoices: await all<Invoice>('SELECT * FROM invoices WHERE user_id = ? ORDER BY id DESC LIMIT 50', [user.id]),
+    ...(await sessionPayload(user)),
   });
 });
 
 appRouter.post('/billing/subscribe', requireAuth, async (req, res) => {
   const { planId } = z.object({ planId: z.number().int() }).parse(req.body);
-  const plan = get<Plan>('SELECT * FROM plans WHERE id = ? AND active = 1', [planId]);
+  const plan = await get<Plan>('SELECT * FROM plans WHERE id = ? AND active = 1', [planId]);
   if (!plan) throw new HttpError(404, 'Plano indisponível');
   const invoice = await issueInvoice(req.user!.id, plan.id);
   res.status(201).json(invoice);
 });
 
-function ownInvoice(userId: number, id: number) {
-  const inv = get<Invoice>('SELECT * FROM invoices WHERE id = ? AND user_id = ?', [id, userId]);
+async function ownInvoice(userId: number, id: number) {
+  const inv = await get<Invoice>('SELECT * FROM invoices WHERE id = ? AND user_id = ?', [id, userId]);
   if (!inv) throw new HttpError(404, 'Fatura não encontrada');
   return inv;
 }
 
 appRouter.post('/billing/invoices/:id/refresh', requireAuth, async (req, res) => {
-  const inv = ownInvoice(req.user!.id, Number(req.params.id));
+  const inv = await ownInvoice(req.user!.id, Number(req.params.id));
   res.json(await syncInvoice(inv));
 });
 
 appRouter.post('/billing/invoices/:id/cancel', requireAuth, async (req, res) => {
-  const inv = ownInvoice(req.user!.id, Number(req.params.id));
+  const inv = await ownInvoice(req.user!.id, Number(req.params.id));
   await cancelInvoice(inv);
   res.status(204).end();
 });

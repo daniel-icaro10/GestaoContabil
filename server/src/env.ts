@@ -25,8 +25,15 @@ function loadSecret(): string {
   return s;
 }
 
+const databaseUrl = process.env.DATABASE_URL ?? '';
+if (!databaseUrl) {
+  console.error('[env] DATABASE_URL não definida. Ex.: postgres://usuario:senha@localhost:5432/gestaocontabil');
+  process.exit(1);
+}
+
 export const env = {
   port: Number(process.env.PORT ?? 3333),
+  databaseUrl,
   appSecret: loadSecret(),
   // No Render, RENDER_EXTERNAL_URL já traz a URL HTTPS pública do serviço.
   publicUrl: (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, ''),

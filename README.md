@@ -6,7 +6,7 @@ permissões por tela e assinatura paga via **Banco Cora** (boleto + PIX).
 ## Estrutura
 
 ```
-server/   API Node.js (Express + SQLite via sql.js) — autenticação, permissões, empresas, assinaturas e integração Cora
+server/   API Node.js (Express + PostgreSQL) — autenticação, permissões, empresas, assinaturas e integração Cora
 web/      Frontend React + Vite + Tailwind — telas do sistema e área administrativa
 ```
 
@@ -26,7 +26,7 @@ npm start                  # http://localhost:3333
 
 **Administrador:** o sistema já vem com o administrador pré-cadastrado definido em `server/src/admin-seed.ts` (o código guarda apenas o e-mail e o hash bcrypt da senha). Ele é criado na primeira inicialização e nunca é sobrescrito — troque a senha em *Meu Perfil*. Para mudar o admin padrão, gere um hash com `npm --prefix server run hash-senha -- "nova senha"` e substitua no arquivo. Se não houver nenhum administrador, o primeiro acesso exibe a tela `/setup` para criá-lo. Copie `server/.env.example` para `server/.env` para configurar.
 
-Os dados ficam em `server/data/app.sqlite`. Faça backup dessa pasta e do arquivo `data/.secret` (ou defina `APP_SECRET`).
+O banco é **PostgreSQL** (defina `DATABASE_URL` em `server/.env`). As tabelas são criadas automaticamente na inicialização pelas migrações em `server/src/migrations` (cada arquivo `.sql` é aplicado uma única vez, em ordem). Para mudar o banco, crie um novo arquivo numerado (ex.: `002_....sql`) — nunca edite um já aplicado. Guarde o `APP_SECRET` (ou o arquivo `data/.secret`).
 Sem o segredo, as credenciais da Cora não podem ser descriptografadas.
 
 ## Perfis e permissões
@@ -68,16 +68,27 @@ Stage, simular o pagamento de um boleto.
 
 Os cálculos tributários têm caráter estimativo e gerencial. Recomenda-se validação por profissional contábil.
 
-## Deploy no Render
+## Deploy na VPS (Docker)
 
-O arquivo `render.yaml` (Blueprint) já define tudo: build, start, health check, disco persistente em `/var/data` e
-variáveis de ambiente.
+Produção roda na VPS com Docker Compose (`docker-compose.vps.yml`): um container da aplicação e um PostgreSQL 16
+próprio (sem porta exposta; dados no volume `gestaocontabil-pg`). O Easypanel/Traefik da VPS cuida do domínio e HTTPS.
 
-1. Envie este repositório para o GitHub.
-2. No Render: **New › Blueprint**, selecione o repositório e confirme.
-3. Nenhuma credencial é configurada no Render. O `APP_SECRET` é gerado automaticamente.
-4. Após o deploy, acesse `https://<servico>.onrender.com` e entre com o administrador pré-cadastrado. Em seguida configure a Cora. A URL do webhook já
-   usa o endereço público do Render (`RENDER_EXTERNAL_URL`).
+Primeira instalação (em `/opt/gestaocontabil`):
 
-> O plano **Starter** é necessário por causa do disco persistente. No plano Free o sistema de arquivos é apagado a cada
-> deploy/reinício e todos os dados (usuários, empresas, faturas) seriam perdidos.
+```bash
+git clone <repositório> /opt/gestaocontabil && cd /opt/gestaocontabil
+cp .env.vps.example .env.vps && chmod 600 .env.vps   # preencha POSTGRES_PASSWORD e APP_SECRET
+docker compose -f docker-compose.vps.yml --env-file .env.vps up -d --build
+```
+
+Atualizar:
+
+```bash
+cd /opt/gestaocontabil && git pull && docker compose -f docker-compose.vps.yml --env-file .env.vps up -d --build
+```
+
+- Sem domínio: `http://IP-DA-VPS:3500`. Com domínio: no Easypanel, aponte o domínio para a porta `3500` do host e
+  defina `PUBLIC_URL=https://seu-dominio` no `.env.vps` (necessário para o webhook da Cora).
+- Backup do banco:
+  `docker compose -f docker-compose.vps.yml exec -T postgres pg_dump -U gestaocontabil gestaocontabil | gzip > backups/$(date +%F).sql.gz`
+- Logs: `docker compose -f docker-compose.vps.yml logs -f app`

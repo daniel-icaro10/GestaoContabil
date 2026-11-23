@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { get, run } from './db.js';
+import { all, run } from './db.js';
 import { env } from './env.js';
 
 // Telas do sistema que o admin pode liberar para cada usuário.
@@ -79,16 +79,44 @@ export interface CoraConfig {
   webhookToken: string; // segredo incluído na URL do webhook
 }
 
-function readJson<T>(key: string): T | undefined {
-  const row = get<{ value: string }>('SELECT value FROM settings WHERE key = ?', [key]);
-  return row ? (JSON.parse(row.value) as T) : undefined;
+// As configurações ficam em memória (carregadas na inicialização) e são gravadas no banco a cada alteração.
+// Só a própria aplicação as altera, então o cache não fica desatualizado.
+const cache = new Map<string, unknown>();
+
+export async function loadSettings() {
+  cache.clear();
+  for (const row of await all<{ key: string; value: string }>('SELECT key, value FROM settings')) {
+    cache.set(row.key, JSON.parse(row.value));
+  }
+  // Gera o token do webhook da Cora na primeira inicialização.
+  if (!cache.has('cora')) {
+    await writeJson('cora', {
+      environment: 'stage',
+      clientId: '',
+      certificate: '',
+      privateKey: '',
+      webhookToken: crypto.randomBytes(16).toString('hex'),
+    });
+  }
 }
 
-function writeJson(key: string, value: unknown) {
-  run(
-    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-    [key, JSON.stringify(value)],
-  );
+function readJson<T>(key: string): T | undefined {
+  const v = cache.get(key);
+  return v === undefined ? undefined : (structuredClone(v) as T);
+}
+
+async function writeJson(key: string, value: unknown) {
+  const json = JSON.stringify(value);
+  await run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value', [
+    key,
+    json,
+  ]);
+  cache.set(key, JSON.parse(json));
+}
+
+export async function deleteSetting(key: string) {
+  await run('DELETE FROM settings WHERE key = ?', [key]);
+  cache.delete(key);
 }
 
 export function getSettings(): AppSettings {
@@ -99,9 +127,9 @@ export function getSettings(): AppSettings {
   return s;
 }
 
-export function saveSettings(patch: Partial<AppSettings>): AppSettings {
+export async function saveSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
   const next = { ...getSettings(), ...patch };
-  writeJson('app', next);
+  await writeJson('app', next);
   return next;
 }
 
@@ -135,14 +163,13 @@ export function getCoraConfig(): CoraConfig {
     webhookToken: crypto.randomBytes(16).toString('hex'),
     ...(stored ?? {}),
   };
-  if (!stored) writeJson('cora', { ...cfg });
   return { ...cfg, privateKey: stored?.privateKey ? decrypt(stored.privateKey) : '' };
 }
 
-export function saveCoraConfig(patch: Partial<CoraConfig>) {
+export async function saveCoraConfig(patch: Partial<CoraConfig>) {
   const current = getCoraConfig();
   const next = { ...current, ...patch };
-  writeJson('cora', { ...next, privateKey: encrypt(next.privateKey) });
+  await writeJson('cora', { ...next, privateKey: encrypt(next.privateKey) });
 }
 
 export function isCoraConfigured(cfg = getCoraConfig()) {

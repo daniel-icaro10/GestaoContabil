@@ -52,25 +52,26 @@ export function grantedModules(user: UserRow): ModuleId[] {
 }
 
 /** Módulos efetivos: os liberados pelo admin mais os do plano da assinatura ativa. */
-export function userModules(user: UserRow): ModuleId[] {
+export async function userModules(user: UserRow): Promise<ModuleId[]> {
   if (user.role === 'admin') return [...MODULE_IDS];
-  const mine = [...grantedModules(user), ...subscriptionModules(user.id)];
+  const mine = [...grantedModules(user), ...(await subscriptionModules(user.id))];
   return MODULE_IDS.filter((m) => mine.includes(m));
 }
 
-export function userPermissions(user: UserRow): PageId[] {
-  return modulePages(userModules(user));
+export async function userPermissions(user: UserRow): Promise<PageId[]> {
+  return modulePages(await userModules(user));
 }
 
-export function publicUser(user: UserRow) {
+export async function publicUser(user: UserRow) {
+  const modules = await userModules(user);
   return {
     id: user.id,
     name: user.name,
     email: user.email,
     role: user.role,
     active: Boolean(user.active),
-    modules: userModules(user),
-    permissions: userPermissions(user),
+    modules,
+    permissions: modulePages(modules),
     document: user.document ?? '',
     phone: user.phone ?? '',
     currentCompanyId: user.current_company_id,
@@ -78,19 +79,20 @@ export function publicUser(user: UserRow) {
   };
 }
 
-export function requireAuth(req: Request, _res: Response, next: NextFunction) {
+export async function requireAuth(req: Request, _res: Response, next: NextFunction) {
   const header = req.headers.authorization ?? '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : '';
   if (!token) return next(new HttpError(401, 'Não autenticado'));
+  let payload: { sub: string };
   try {
-    const payload = jwt.verify(token, env.appSecret) as { sub: string };
-    const user = get<UserRow>('SELECT * FROM users WHERE id = ?', [Number(payload.sub)]);
-    if (!user || !user.active) return next(new HttpError(401, 'Sessão inválida'));
-    req.user = user;
-    next();
+    payload = jwt.verify(token, env.appSecret) as { sub: string };
   } catch {
-    next(new HttpError(401, 'Sessão expirada'));
+    return next(new HttpError(401, 'Sessão expirada'));
   }
+  const user = await get<UserRow>('SELECT * FROM users WHERE id = ?', [Number(payload.sub)]);
+  if (!user || !user.active) return next(new HttpError(401, 'Sessão inválida'));
+  req.user = user;
+  next();
 }
 
 export function requireAdmin(req: Request, _res: Response, next: NextFunction) {
@@ -100,8 +102,8 @@ export function requireAdmin(req: Request, _res: Response, next: NextFunction) {
 
 /** Exige que o usuário tenha ao menos um dos módulos informados (sem argumentos: qualquer módulo). */
 export function requireModule(...modules: ModuleId[]) {
-  return (req: Request, _res: Response, next: NextFunction) => {
-    const mine = req.user ? userModules(req.user) : [];
+  return async (req: Request, _res: Response, next: NextFunction) => {
+    const mine = req.user ? await userModules(req.user) : [];
     const ok = modules.length ? modules.some((m) => mine.includes(m)) : mine.length > 0;
     if (!ok) return next(new HttpError(403, 'Você não tem permissão para este módulo. Solicite a liberação ao administrador.'));
     next();
@@ -109,8 +111,8 @@ export function requireModule(...modules: ModuleId[]) {
 }
 
 /** Bloqueia os dados do sistema para usuários sem assinatura ativa. */
-export function requireSubscription(req: Request, _res: Response, next: NextFunction) {
-  if (!req.user || !hasAccess(req.user)) {
+export async function requireSubscription(req: Request, _res: Response, next: NextFunction) {
+  if (!req.user || !(await hasAccess(req.user))) {
     return next(new HttpError(402, 'Assinatura inativa. Regularize o pagamento para continuar.'));
   }
   next();

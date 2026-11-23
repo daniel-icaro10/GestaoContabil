@@ -2,7 +2,7 @@ import { X509Certificate } from 'node:crypto';
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { all, get, run } from '../db.js';
+import { all, get, insert, run } from '../db.js';
 import { HttpError, grantedModules, publicUser, requireAdmin, requireAuth, type UserRow } from '../auth.js';
 import {
   MODULE_IDS,
@@ -36,30 +36,31 @@ const moduleList = z.array(z.enum(MODULE_IDS));
 
 // ---------------- Painel ----------------
 
-adminRouter.get('/stats', (_req, res) => {
+adminRouter.get('/stats', async (_req, res) => {
   const now = new Date().toISOString();
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
-  const users = get<{ n: number }>(`SELECT COUNT(*) n FROM users WHERE role = 'user'`)!.n;
-  const activeSubs = get<{ n: number }>(
-    'SELECT COUNT(*) n FROM subscriptions WHERE current_period_end >= ?',
+  const users = (await get<{ n: number }>(`SELECT COUNT(*) AS n FROM users WHERE role = 'user'`))!.n;
+  const activeSubs = (await get<{ n: number }>(
+    'SELECT COUNT(*) AS n FROM subscriptions WHERE current_period_end >= ?',
     [now],
-  )!.n;
-  const mrr = get<{ v: number }>(
-    `SELECT COALESCE(SUM(CAST(p.price_cents AS REAL) / p.interval_months), 0) v
+  ))!.n;
+  const mrr = (await get<{ v: number }>(
+    `SELECT COALESCE(SUM(p.price_cents::float8 / p.interval_months), 0) AS v
      FROM subscriptions s JOIN plans p ON p.id = s.plan_id WHERE s.current_period_end >= ?`,
     [now],
-  )!.v;
-  const openInvoices = get<{ n: number; v: number }>(
-    `SELECT COUNT(*) n, COALESCE(SUM(amount_cents), 0) v FROM invoices WHERE applied = 0 AND status IN ('OPEN','LATE','IN_PAYMENT')`,
-  )!;
-  const revenue30 = get<{ v: number }>(
-    'SELECT COALESCE(SUM(amount_cents), 0) v FROM invoices WHERE applied = 1 AND paid_at >= ?',
+  ))!.v;
+  const openInvoices = (await get<{ n: number; v: number }>(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(amount_cents), 0) AS v FROM invoices WHERE applied = 0 AND status IN ('OPEN','LATE','IN_PAYMENT')`,
+  ))!;
+  const revenue30 = (await get<{ v: number }>(
+    'SELECT COALESCE(SUM(amount_cents), 0) AS v FROM invoices WHERE applied = 1 AND paid_at >= ?',
     [since],
-  )!.v;
-  const monthly = all<{ month: string; v: number }>(
-    `SELECT substr(paid_at, 1, 7) month, SUM(amount_cents) v FROM invoices
+  ))!.v;
+  const monthly = (
+    await all<{ month: string; v: number }>(
+    `SELECT to_char(paid_at AT TIME ZONE 'UTC', 'YYYY-MM') AS month, SUM(amount_cents) AS v FROM invoices
      WHERE applied = 1 AND paid_at IS NOT NULL GROUP BY month ORDER BY month DESC LIMIT 12`,
-  ).reverse();
+  )).reverse();
   res.json({
     users,
     activeSubs,
@@ -74,12 +75,12 @@ adminRouter.get('/stats', (_req, res) => {
 
 // ---------------- Usuários e permissões ----------------
 
-function adminUserView(u: UserRow) {
-  const sub = getSubscription(u.id);
-  const plan = sub ? get<Plan>('SELECT name FROM plans WHERE id = ?', [sub.plan_id]) : undefined;
-  const companies = get<{ n: number }>('SELECT COUNT(*) n FROM companies WHERE user_id = ?', [u.id])!.n;
+async function adminUserView(u: UserRow) {
+  const sub = await getSubscription(u.id);
+  const plan = sub ? await get<Plan>('SELECT name FROM plans WHERE id = ?', [sub.plan_id]) : undefined;
+  const companies = (await get<{ n: number }>('SELECT COUNT(*) AS n FROM companies WHERE user_id = ?', [u.id]))!.n;
   return {
-    ...publicUser(u),
+    ...(await publicUser(u)),
     // `modules` (de publicUser) são os efetivos; estes são só os liberados manualmente.
     grantedModules: grantedModules(u),
     companies,
@@ -89,8 +90,9 @@ function adminUserView(u: UserRow) {
   };
 }
 
-adminRouter.get('/users', (_req, res) => {
-  res.json(all<UserRow>('SELECT * FROM users ORDER BY role, name').map(adminUserView));
+adminRouter.get('/users', async (_req, res) => {
+  const users = await all<UserRow>('SELECT * FROM users ORDER BY role, name');
+  res.json(await Promise.all(users.map(adminUserView)));
 });
 
 const userBody = z.object({
@@ -104,11 +106,11 @@ const userBody = z.object({
   password: z.string().optional().default(''),
 });
 
-adminRouter.post('/users', (req, res) => {
+adminRouter.post('/users', async (req, res) => {
   const b = userBody.parse(req.body);
   if (b.password.length < 6) throw new HttpError(400, 'A senha deve ter ao menos 6 caracteres');
-  if (get('SELECT id FROM users WHERE email = ?', [b.email])) throw new HttpError(409, 'E-mail já cadastrado');
-  const { lastId } = run(
+  if (await get('SELECT id FROM users WHERE email = ?', [b.email])) throw new HttpError(409, 'E-mail já cadastrado');
+  const lastId = await insert(
     `INSERT INTO users (name, email, password_hash, role, active, permissions, document, phone)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
@@ -122,75 +124,75 @@ adminRouter.post('/users', (req, res) => {
       b.phone || null,
     ],
   );
-  res.status(201).json(adminUserView(get<UserRow>('SELECT * FROM users WHERE id = ?', [lastId])!));
+  res.status(201).json(await adminUserView((await get<UserRow>('SELECT * FROM users WHERE id = ?', [lastId]))!));
 });
 
-adminRouter.put('/users/:id', (req, res) => {
+adminRouter.put('/users/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const user = get<UserRow>('SELECT * FROM users WHERE id = ?', [id]);
+  const user = await get<UserRow>('SELECT * FROM users WHERE id = ?', [id]);
   if (!user) throw new HttpError(404, 'Usuário não encontrado');
   const b = userBody.parse(req.body);
   if (id === req.user!.id && (b.role !== 'admin' || !b.active)) {
     throw new HttpError(400, 'Você não pode remover seu próprio acesso de administrador');
   }
-  const dup = get<{ id: number }>('SELECT id FROM users WHERE email = ? AND id != ?', [b.email, id]);
+  const dup = await get<{ id: number }>('SELECT id FROM users WHERE email = ? AND id != ?', [b.email, id]);
   if (dup) throw new HttpError(409, 'E-mail já cadastrado');
-  run(
+  await run(
     `UPDATE users SET name = ?, email = ?, role = ?, active = ?, permissions = ?, document = ?, phone = ? WHERE id = ?`,
     [b.name, b.email, b.role, b.active, JSON.stringify(b.modules), b.document.replace(/\D/g, '') || null, b.phone || null, id],
   );
   if (b.password) {
     if (b.password.length < 6) throw new HttpError(400, 'A senha deve ter ao menos 6 caracteres');
-    run('UPDATE users SET password_hash = ? WHERE id = ?', [bcrypt.hashSync(b.password, 10), id]);
+    await run('UPDATE users SET password_hash = ? WHERE id = ?', [bcrypt.hashSync(b.password, 10), id]);
   }
-  res.json(adminUserView(get<UserRow>('SELECT * FROM users WHERE id = ?', [id])!));
+  res.json(await adminUserView((await get<UserRow>('SELECT * FROM users WHERE id = ?', [id]))!));
 });
 
-adminRouter.delete('/users/:id', (req, res) => {
+adminRouter.delete('/users/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (id === req.user!.id) throw new HttpError(400, 'Você não pode excluir a si mesmo');
-  run('DELETE FROM users WHERE id = ?', [id]);
+  await run('DELETE FROM users WHERE id = ?', [id]);
   res.status(204).end();
 });
 
 // Concede (ou ajusta) manualmente o período de acesso de um usuário.
-adminRouter.post('/users/:id/access', (req, res) => {
+adminRouter.post('/users/:id/access', async (req, res) => {
   const id = Number(req.params.id);
   const b = z.object({ planId: z.number().int(), until: z.string().min(10) }).parse(req.body);
-  if (!get('SELECT id FROM users WHERE id = ?', [id])) throw new HttpError(404, 'Usuário não encontrado');
-  if (!get('SELECT id FROM plans WHERE id = ?', [b.planId])) throw new HttpError(404, 'Plano não encontrado');
+  if (!(await get('SELECT id FROM users WHERE id = ?', [id]))) throw new HttpError(404, 'Usuário não encontrado');
+  if (!(await get('SELECT id FROM plans WHERE id = ?', [b.planId]))) throw new HttpError(404, 'Plano não encontrado');
   const until = new Date(`${b.until.slice(0, 10)}T23:59:59.000Z`).toISOString();
-  const sub = getSubscription(id);
+  const sub = await getSubscription(id);
   if (sub) {
-    run(`UPDATE subscriptions SET plan_id = ?, status = 'active', current_period_end = ?, updated_at = datetime('now') WHERE id = ?`, [
+    await run(`UPDATE subscriptions SET plan_id = ?, status = 'active', current_period_end = ?, updated_at = now() WHERE id = ?`, [
       b.planId,
       until,
       sub.id,
     ]);
   } else {
-    run(`INSERT INTO subscriptions (user_id, plan_id, status, current_period_end) VALUES (?, ?, 'active', ?)`, [
+    await run(`INSERT INTO subscriptions (user_id, plan_id, status, current_period_end) VALUES (?, ?, 'active', ?)`, [
       id,
       b.planId,
       until,
     ]);
   }
-  res.json(adminUserView(get<UserRow>('SELECT * FROM users WHERE id = ?', [id])!));
+  res.json(await adminUserView((await get<UserRow>('SELECT * FROM users WHERE id = ?', [id]))!));
 });
 
 adminRouter.post('/users/:id/revoke', async (req, res) => {
   const id = Number(req.params.id);
   // Cancela as cobranças em aberto antes, para que o pagamento de um boleto antigo não devolva o acesso.
-  for (const inv of all<Invoice>(
+  for (const inv of await all<Invoice>(
     `SELECT * FROM invoices WHERE user_id = ? AND applied = 0 AND status IN (${OPEN_STATUSES.map(() => '?').join(',')})`,
     [id, ...OPEN_STATUSES],
   )) {
     await cancelInvoice(inv);
   }
-  run(`UPDATE subscriptions SET status = 'canceled', current_period_end = ?, updated_at = datetime('now') WHERE user_id = ?`, [
+  await run(`UPDATE subscriptions SET status = 'canceled', current_period_end = ?, updated_at = now() WHERE user_id = ?`, [
     new Date(Date.now() - 365 * 86_400_000).toISOString(),
     id,
   ]);
-  res.json(adminUserView(get<UserRow>('SELECT * FROM users WHERE id = ?', [id])!));
+  res.json(await adminUserView((await get<UserRow>('SELECT * FROM users WHERE id = ?', [id]))!));
 });
 
 // ---------------- Planos ----------------
@@ -206,29 +208,30 @@ const planBody = z.object({
 
 const planView = (p: Plan) => ({ ...p, modules: planModules(p) });
 
-adminRouter.get('/plans', (_req, res) => {
+adminRouter.get('/plans', async (_req, res) => {
   res.json(
-    all<Plan>(
+    (
+      await all<Plan>(
       `SELECT p.*, (SELECT COUNT(*) FROM subscriptions s WHERE s.plan_id = p.id AND s.current_period_end >= ?) AS subscribers
        FROM plans p ORDER BY p.price_cents`,
       [new Date().toISOString()],
-    ).map(planView),
+    )).map(planView),
   );
 });
 
-adminRouter.post('/plans', (req, res) => {
+adminRouter.post('/plans', async (req, res) => {
   const b = planBody.parse(req.body);
-  const { lastId } = run(
+  const lastId = await insert(
     'INSERT INTO plans (name, description, price_cents, interval_months, active, modules) VALUES (?, ?, ?, ?, ?, ?)',
     [b.name, b.description, b.price_cents, b.interval_months, b.active, JSON.stringify(b.modules)],
   );
-  res.status(201).json(planView(get<Plan>('SELECT * FROM plans WHERE id = ?', [lastId])!));
+  res.status(201).json(planView((await get<Plan>('SELECT * FROM plans WHERE id = ?', [lastId]))!));
 });
 
-adminRouter.put('/plans/:id', (req, res) => {
+adminRouter.put('/plans/:id', async (req, res) => {
   const id = Number(req.params.id);
   const b = planBody.parse(req.body);
-  run('UPDATE plans SET name = ?, description = ?, price_cents = ?, interval_months = ?, active = ?, modules = ? WHERE id = ?', [
+  await run('UPDATE plans SET name = ?, description = ?, price_cents = ?, interval_months = ?, active = ?, modules = ? WHERE id = ?', [
     b.name,
     b.description,
     b.price_cents,
@@ -237,35 +240,35 @@ adminRouter.put('/plans/:id', (req, res) => {
     JSON.stringify(b.modules),
     id,
   ]);
-  res.json(planView(get<Plan>('SELECT * FROM plans WHERE id = ?', [id])!));
+  res.json(planView((await get<Plan>('SELECT * FROM plans WHERE id = ?', [id]))!));
 });
 
-adminRouter.delete('/plans/:id', (req, res) => {
+adminRouter.delete('/plans/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const used = get<{ n: number }>(
-    'SELECT (SELECT COUNT(*) FROM subscriptions WHERE plan_id = ?) + (SELECT COUNT(*) FROM invoices WHERE plan_id = ?) n',
+  const used = (await get<{ n: number }>(
+    'SELECT (SELECT COUNT(*) FROM subscriptions WHERE plan_id = ?) + (SELECT COUNT(*) FROM invoices WHERE plan_id = ?) AS n',
     [id, id],
-  )!.n;
+  ))!.n;
   if (used > 0) throw new HttpError(400, 'Plano em uso — desative-o em vez de excluir');
-  run('DELETE FROM plans WHERE id = ?', [id]);
+  await run('DELETE FROM plans WHERE id = ?', [id]);
   res.status(204).end();
 });
 
 // ---------------- Faturas ----------------
 
-adminRouter.get('/invoices', (req, res) => {
+adminRouter.get('/invoices', async (req, res) => {
   const status = typeof req.query.status === 'string' ? req.query.status : '';
-  const rows = all(
+  const rows = await all(
     `SELECT i.*, u.name AS user_name, u.email AS user_email, p.name AS plan_name
      FROM invoices i JOIN users u ON u.id = i.user_id LEFT JOIN plans p ON p.id = i.plan_id
-     ${status ? 'WHERE i.status = @status' : ''} ORDER BY i.id DESC LIMIT 500`,
-    status ? { status } : undefined,
+     ${status ? 'WHERE i.status = ?' : ''} ORDER BY i.id DESC LIMIT 500`,
+    status ? [status] : [],
   );
   res.json(rows);
 });
 
-function findInvoice(id: number) {
-  const inv = get<Invoice>('SELECT * FROM invoices WHERE id = ?', [id]);
+async function findInvoice(id: number) {
+  const inv = await get<Invoice>('SELECT * FROM invoices WHERE id = ?', [id]);
   if (!inv) throw new HttpError(404, 'Fatura não encontrada');
   return inv;
 }
@@ -276,25 +279,25 @@ adminRouter.post('/invoices', async (req, res) => {
 });
 
 adminRouter.post('/invoices/:id/refresh', async (req, res) => {
-  res.json(await syncInvoice(findInvoice(Number(req.params.id))));
+  res.json(await syncInvoice(await findInvoice(Number(req.params.id))));
 });
 
 adminRouter.post('/invoices/:id/cancel', async (req, res) => {
-  await cancelInvoice(findInvoice(Number(req.params.id)));
+  await cancelInvoice(await findInvoice(Number(req.params.id)));
   res.status(204).end();
 });
 
 // Baixa manual (ex.: pagamento recebido fora da Cora).
-adminRouter.post('/invoices/:id/mark-paid', (req, res) => {
-  const inv = findInvoice(Number(req.params.id));
-  run('UPDATE invoices SET manual = 1 WHERE id = ?', [inv.id]);
-  applyPayment(inv);
-  res.json(findInvoice(inv.id));
+adminRouter.post('/invoices/:id/mark-paid', async (req, res) => {
+  const inv = await findInvoice(Number(req.params.id));
+  await run('UPDATE invoices SET manual = 1 WHERE id = ?', [inv.id]);
+  await applyPayment(inv);
+  res.json(await findInvoice(inv.id));
 });
 
 // Simula o pagamento no ambiente Stage da Cora (apenas testes).
 adminRouter.post('/invoices/:id/stage-pay', async (req, res) => {
-  const inv = findInvoice(Number(req.params.id));
+  const inv = await findInvoice(Number(req.params.id));
   if (getCoraConfig().environment !== 'stage') throw new HttpError(400, 'Disponível apenas no ambiente Stage');
   if (!inv.cora_id) throw new HttpError(400, 'Fatura sem identificador Cora');
   await cora.payInvoiceStage(inv.cora_id);
@@ -308,11 +311,11 @@ adminRouter.post('/billing/run', async (_req, res) => {
 
 // ---------------- Configurações gerais ----------------
 
-adminRouter.get('/settings', (_req, res) => {
+adminRouter.get('/settings', async (_req, res) => {
   res.json({ ...getSettings(), modules: MODULE_IDS });
 });
 
-adminRouter.put('/settings', (req, res) => {
+adminRouter.put('/settings', async (req, res) => {
   const b = z
     .object({
       allowSignup: z.boolean(),
@@ -326,7 +329,7 @@ adminRouter.put('/settings', (req, res) => {
       paymentForms: z.array(z.enum(['BANK_SLIP', 'PIX'])).min(1, 'Selecione ao menos uma forma de pagamento'),
     })
     .parse(req.body);
-  res.json({ ...saveSettings(b), modules: MODULE_IDS });
+  res.json({ ...(await saveSettings(b)), modules: MODULE_IDS });
 });
 
 // ---------------- Integração Cora ----------------
@@ -356,11 +359,11 @@ function coraView(cfg: CoraConfig, req: { protocol: string; get(h: string): stri
   };
 }
 
-adminRouter.get('/cora', (req, res) => {
+adminRouter.get('/cora', async (req, res) => {
   res.json(coraView(getCoraConfig(), req));
 });
 
-adminRouter.put('/cora', (req, res) => {
+adminRouter.put('/cora', async (req, res) => {
   const b = z
     .object({
       environment: z.enum(['stage', 'production']),
@@ -385,7 +388,7 @@ adminRouter.put('/cora', (req, res) => {
     if (!b.privateKey.includes('PRIVATE KEY')) throw new HttpError(400, 'Chave privada deve estar no formato PEM');
     patch.privateKey = b.privateKey.trim();
   }
-  saveCoraConfig(patch);
+  await saveCoraConfig(patch);
   cora.resetToken();
   res.json(coraView(getCoraConfig(), req));
 });
@@ -416,6 +419,6 @@ adminRouter.delete('/cora/endpoints/:id', async (req, res) => {
   res.status(204).end();
 });
 
-adminRouter.get('/cora/webhook-events', (_req, res) => {
-  res.json(all('SELECT * FROM webhook_events ORDER BY id DESC LIMIT 50'));
+adminRouter.get('/cora/webhook-events', async (_req, res) => {
+  res.json(await all('SELECT * FROM webhook_events ORDER BY id DESC LIMIT 50'));
 });
