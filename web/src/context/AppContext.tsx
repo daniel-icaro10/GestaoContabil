@@ -45,6 +45,8 @@ interface AppCtx {
   deleteCompany(id: number): Promise<void>;
   saveTaxConfig(cfg: TaxConfig | null): Promise<void>;
   reload(): Promise<void>;
+  /** Grava imediatamente as alterações pendentes (ex.: antes de sair). */
+  saveNow(): Promise<void>;
 }
 
 const Ctx = createContext<AppCtx | null>(null);
@@ -75,26 +77,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const enabled = Boolean(session?.access.hasAccess && session.user.permissions.length);
   const userName = session?.user.name ?? '';
 
+  // Cada carga recebe um número; respostas de cargas antigas (ex.: de um usuário que já saiu) são descartadas.
+  const loadSeq = useRef(0);
+
   const reload = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setError(null);
     try {
-      let [list, cfg] = await Promise.all([api<CompanyRecord[]>('/companies'), api<TaxConfig | null>('/tax-config')]);
+      const [first, cfg] = await Promise.all([api<CompanyRecord[]>('/companies'), api<TaxConfig | null>('/tax-config')]);
+      let list = first;
+      if (seq !== loadSeq.current) return;
       if (list.length === 0) {
         // Primeiro acesso: cria uma análise de exemplo para o usuário explorar o sistema.
         const created = await api<CompanyRecord>('/companies', { body: exampleCompany(userName || undefined) });
         list = [created];
       }
+      if (seq !== loadSeq.current) return;
       setCompanies(list);
       setTaxConfig(mergeTaxConfig(cfg));
       const preferred = session?.user.currentCompanyId;
       setCurrentId(list.some((c) => c.id === preferred) ? preferred! : list[0].id);
       setReady(true);
     } catch (e: any) {
-      setError(e.message);
+      if (seq === loadSeq.current) setError(e.message);
     }
   }, [session?.user.currentCompanyId, userName]);
 
   useEffect(() => {
+    // Troca de usuário (ou perda de acesso): descarta o estado do anterior.
+    loadSeq.current++;
+    dirty.current.clear();
+    if (timer.current) clearTimeout(timer.current);
+    setNovaAnaliseStep(0);
+    setSaveState('idle');
     if (enabled) reload();
     else {
       setReady(false);
@@ -103,32 +118,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, session?.user.id]);
 
-  const flush = useCallback(async () => {
-    const ids = [...dirty.current];
-    dirty.current.clear();
-    if (!ids.length) return;
-    setSaveState('saving');
-    try {
-      for (const id of ids) {
-        const c = companiesRef.current.find((x) => x.id === id);
-        if (!c) continue;
-        const saved = await api<CompanyRecord>(`/companies/${id}`, { method: 'PUT', body: strip(c) });
-        setCompanies((list) => list.map((x) => (x.id === id ? { ...x, updatedAt: saved.updatedAt } : x)));
+  // Salvamentos em fila: um PUT por vez, para que uma gravação antiga nunca chegue depois de uma nova.
+  const saving = useRef<Promise<void>>(Promise.resolve());
+
+  const flush = useCallback((): Promise<void> => {
+    const run = async () => {
+      const ids = [...dirty.current];
+      dirty.current.clear();
+      if (!ids.length) return;
+      setSaveState('saving');
+      try {
+        for (const id of ids) {
+          const c = companiesRef.current.find((x) => x.id === id);
+          if (!c) continue;
+          const saved = await api<CompanyRecord>(`/companies/${id}`, { method: 'PUT', body: strip(c) });
+          setCompanies((list) => list.map((x) => (x.id === id ? { ...x, updatedAt: saved.updatedAt } : x)));
+        }
+        setSaveState(dirty.current.size ? 'saving' : 'saved');
+      } catch {
+        ids.forEach((id) => dirty.current.add(id));
+        setSaveState('error');
+        // Nova tentativa automática (ex.: queda de rede ou servidor reiniciando).
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => void flush(), 5000);
       }
-      setSaveState('saved');
-    } catch {
-      ids.forEach((id) => dirty.current.add(id));
-      setSaveState('error');
-    }
+    };
+    saving.current = saving.current.then(run, run);
+    return saving.current;
   }, []);
 
   useEffect(() => {
+    // Ao fechar/recarregar a aba: envia o que falta com keepalive (um fetch comum seria abortado).
     const onUnload = () => {
-      if (dirty.current.size) flush();
+      for (const id of dirty.current) {
+        const c = companiesRef.current.find((x) => x.id === id);
+        if (c) api(`/companies/${id}`, { method: 'PUT', body: strip(c), keepalive: true }).catch(() => undefined);
+      }
     };
     window.addEventListener('beforeunload', onUnload);
     return () => window.removeEventListener('beforeunload', onUnload);
-  }, [flush]);
+  }, []);
 
   const patchCurrent = useCallback(
     (fn: (c: CompanyRecord) => CompanyRecord) => {
@@ -194,6 +223,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setTaxConfig(mergeTaxConfig(cfg));
       },
       reload,
+      saveNow: async () => {
+        if (timer.current) clearTimeout(timer.current);
+        await flush();
+      },
     }),
     [ready, error, companies, current, data, results, taxConfig, saveState, novaAnaliseStep, patchCurrent, flush, userName, currentId, reload],
   );

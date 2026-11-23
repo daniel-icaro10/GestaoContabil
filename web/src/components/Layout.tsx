@@ -29,7 +29,7 @@ import { useApp } from '../context/AppContext';
 import { MODULES, modulePages, pageLabel } from '../lib/pages';
 import { dateBR, money } from '../lib/format';
 import { soma } from '../lib/tax';
-import { Badge } from './ui';
+import { Badge, useToast } from './ui';
 import { ThemeToggle } from './ThemeToggle';
 
 const ADMIN_LINKS = [
@@ -153,6 +153,7 @@ function Sidebar({ open, onClose }: { open: boolean; onClose(): void }) {
 
 function CompanySwitcher() {
   const app = useApp();
+  const toast = useToast();
   const navigate = useNavigate();
   const { can } = useAuth();
   const [open, setOpen] = useState(false);
@@ -195,7 +196,7 @@ function CompanySwitcher() {
               <button
                 key={c.id}
                 onClick={() => {
-                  app.selectCompany(c.id);
+                  app.selectCompany(c.id).catch((e) => toast(e.message, 'danger'));
                   setOpen(false);
                 }}
                 className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left hover:bg-subtle"
@@ -293,6 +294,7 @@ function Notifications() {
 
 function UserMenu() {
   const { session, logout, isAdmin } = useAuth();
+  const { saveNow } = useApp();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useClickOutside(open, () => setOpen(false));
@@ -324,7 +326,16 @@ function UserMenu() {
           {!isAdmin && <MenuBtn icon={<CircleDollarSign size={14} />} onClick={() => go('/assinatura')}>Assinatura</MenuBtn>}
           {isAdmin && <MenuBtn icon={<KeyRound size={14} />} onClick={() => go('/admin')}>Administração</MenuBtn>}
           <div className="my-1 h-px bg-line" />
-          <MenuBtn icon={<LogOut size={14} />} onClick={logout}>Sair</MenuBtn>
+          <MenuBtn
+            icon={<LogOut size={14} />}
+            onClick={async () => {
+              // Grava alterações pendentes antes de descartar o token.
+              await saveNow().catch(() => undefined);
+              logout();
+            }}
+          >
+            Sair
+          </MenuBtn>
         </div>
       )}
     </div>

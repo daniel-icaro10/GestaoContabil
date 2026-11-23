@@ -54,7 +54,15 @@ app.post('/api/webhooks/cora/:token', async (req, res) => {
   handleWebhook(resourceId, eventType, eventId).catch((e) => console.warn('[webhook]', e.message));
 });
 
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
+// Verifica também o banco: se o Postgres cair, o container fica "unhealthy".
+app.get('/api/health', async (_req, res) => {
+  try {
+    await get('SELECT 1');
+    res.json({ ok: true });
+  } catch {
+    res.status(503).json({ ok: false, error: 'Banco de dados indisponível' });
+  }
+});
 
 app.use('/api/admin', adminRouter);
 app.use('/api', appRouter);
@@ -71,6 +79,11 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     return res.status(400).json({ error: err.issues[0]?.message ?? 'Dados inválidos' });
   }
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
+  // Erros do leitor de JSON (corpo malformado ou grande demais).
+  const status = (err as { status?: number; type?: string })?.status;
+  if (status && status >= 400 && status < 500 && (err as { type?: string }).type) {
+    return res.status(status).json({ error: status === 413 ? 'Dados grandes demais' : 'Requisição inválida' });
+  }
   if (err instanceof CoraError) {
     const status = err.status >= 400 && err.status < 600 ? (err.status === 401 ? 502 : err.status) : 502;
     return res.status(status).json({ error: err.message });

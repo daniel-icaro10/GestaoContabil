@@ -231,9 +231,15 @@ export const totalCustos = (c: Custos) => soma(CUSTO_KEYS.map((k) => c[k]));
 export const totalDespesas = (c: Custos) => soma(DESPESA_KEYS.map((k) => c[k]));
 export const baseCreditos = (c: Creditos) => soma(CREDITO_PISCOFINS_KEYS.map((k) => c[k]));
 
+/**
+ * Folha para o Fator R (LC 123/2006, art. 18, §24): salários e pró-labore, mais a contribuição patronal
+ * previdenciária e o FGTS. Benefícios e outras despesas com pessoal não entram.
+ */
+export const folhaFatorR = (f: Folha) => f.salarios + f.proLabore + f.inssPatronal + f.fgts;
+
 export function fatorR(folha: Folha, fat: Faturamento) {
   const r = receitaAnual(fat.meses);
-  return r === 0 ? 0 : totalFolha(folha) / r;
+  return r === 0 ? 0 : folhaFatorR(folha) / r;
 }
 
 export function resultadoOperacional(fat: Faturamento, custos: Custos, folha: Folha) {
@@ -264,6 +270,10 @@ export interface ResultadoSimples {
   /** Falso quando a receita anual ultrapassa o limite do Simples Nacional. */
   elegivel: boolean;
 }
+
+/** O Fator R só decide o anexo de atividades de serviço; comércio e indústria têm anexo fixo (I e II). */
+export const usaFatorR = (tipo: TipoAtividade) =>
+  tipo !== 'Comércio' && tipo !== 'Indústria' && tipo !== 'Indústria e Comércio';
 
 export function anexoAplicavel(tipo: TipoAtividade, fr: number, cfg: TaxConfig): AnexoNome {
   if (tipo === 'Comércio') return 'Anexo I - Comércio';

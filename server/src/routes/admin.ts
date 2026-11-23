@@ -3,7 +3,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { all, get, insert, run } from '../db.js';
-import { HttpError, grantedModules, publicUser, requireAdmin, requireAuth, type UserRow } from '../auth.js';
+import { HttpError, grantedModules, idParam, publicUser, requireAdmin, requireAuth, type UserRow } from '../auth.js';
 import {
   MODULE_IDS,
   getCoraConfig,
@@ -128,7 +128,7 @@ adminRouter.post('/users', async (req, res) => {
 });
 
 adminRouter.put('/users/:id', async (req, res) => {
-  const id = Number(req.params.id);
+  const id = idParam(req);
   const user = await get<UserRow>('SELECT * FROM users WHERE id = ?', [id]);
   if (!user) throw new HttpError(404, 'Usuário não encontrado');
   const b = userBody.parse(req.body);
@@ -137,19 +137,28 @@ adminRouter.put('/users/:id', async (req, res) => {
   }
   const dup = await get<{ id: number }>('SELECT id FROM users WHERE email = ? AND id != ?', [b.email, id]);
   if (dup) throw new HttpError(409, 'E-mail já cadastrado');
+  // Valida tudo antes de gravar, para não salvar a edição pela metade.
+  if (b.password && b.password.length < 6) throw new HttpError(400, 'A senha deve ter ao menos 6 caracteres');
   await run(
-    `UPDATE users SET name = ?, email = ?, role = ?, active = ?, permissions = ?, document = ?, phone = ? WHERE id = ?`,
-    [b.name, b.email, b.role, b.active, JSON.stringify(b.modules), b.document.replace(/\D/g, '') || null, b.phone || null, id],
+    `UPDATE users SET name = ?, email = ?, role = ?, active = ?, permissions = ?, document = ?, phone = ?,
+       password_hash = COALESCE(?, password_hash) WHERE id = ?`,
+    [
+      b.name,
+      b.email,
+      b.role,
+      b.active,
+      JSON.stringify(b.modules),
+      b.document.replace(/\D/g, '') || null,
+      b.phone || null,
+      b.password ? bcrypt.hashSync(b.password, 10) : null,
+      id,
+    ],
   );
-  if (b.password) {
-    if (b.password.length < 6) throw new HttpError(400, 'A senha deve ter ao menos 6 caracteres');
-    await run('UPDATE users SET password_hash = ? WHERE id = ?', [bcrypt.hashSync(b.password, 10), id]);
-  }
   res.json(await adminUserView((await get<UserRow>('SELECT * FROM users WHERE id = ?', [id]))!));
 });
 
 adminRouter.delete('/users/:id', async (req, res) => {
-  const id = Number(req.params.id);
+  const id = idParam(req);
   if (id === req.user!.id) throw new HttpError(400, 'Você não pode excluir a si mesmo');
   await run('DELETE FROM users WHERE id = ?', [id]);
   res.status(204).end();
@@ -157,11 +166,13 @@ adminRouter.delete('/users/:id', async (req, res) => {
 
 // Concede (ou ajusta) manualmente o período de acesso de um usuário.
 adminRouter.post('/users/:id/access', async (req, res) => {
-  const id = Number(req.params.id);
+  const id = idParam(req);
   const b = z.object({ planId: z.number().int(), until: z.string().min(10) }).parse(req.body);
   if (!(await get('SELECT id FROM users WHERE id = ?', [id]))) throw new HttpError(404, 'Usuário não encontrado');
   if (!(await get('SELECT id FROM plans WHERE id = ?', [b.planId]))) throw new HttpError(404, 'Plano não encontrado');
-  const until = new Date(`${b.until.slice(0, 10)}T23:59:59.000Z`).toISOString();
+  const untilDate = new Date(`${b.until.slice(0, 10)}T23:59:59.000Z`);
+  if (Number.isNaN(untilDate.getTime())) throw new HttpError(400, 'Data inválida');
+  const until = untilDate.toISOString();
   const sub = await getSubscription(id);
   if (sub) {
     await run(`UPDATE subscriptions SET plan_id = ?, status = 'active', current_period_end = ?, updated_at = now() WHERE id = ?`, [
@@ -180,7 +191,7 @@ adminRouter.post('/users/:id/access', async (req, res) => {
 });
 
 adminRouter.post('/users/:id/revoke', async (req, res) => {
-  const id = Number(req.params.id);
+  const id = idParam(req);
   // Cancela as cobranças em aberto antes, para que o pagamento de um boleto antigo não devolva o acesso.
   for (const inv of await all<Invoice>(
     `SELECT * FROM invoices WHERE user_id = ? AND applied = 0 AND status IN (${OPEN_STATUSES.map(() => '?').join(',')})`,
@@ -229,9 +240,9 @@ adminRouter.post('/plans', async (req, res) => {
 });
 
 adminRouter.put('/plans/:id', async (req, res) => {
-  const id = Number(req.params.id);
+  const id = idParam(req);
   const b = planBody.parse(req.body);
-  await run('UPDATE plans SET name = ?, description = ?, price_cents = ?, interval_months = ?, active = ?, modules = ? WHERE id = ?', [
+  const { changes } = await run('UPDATE plans SET name = ?, description = ?, price_cents = ?, interval_months = ?, active = ?, modules = ? WHERE id = ?', [
     b.name,
     b.description,
     b.price_cents,
@@ -240,11 +251,12 @@ adminRouter.put('/plans/:id', async (req, res) => {
     JSON.stringify(b.modules),
     id,
   ]);
+  if (!changes) throw new HttpError(404, 'Plano não encontrado');
   res.json(planView((await get<Plan>('SELECT * FROM plans WHERE id = ?', [id]))!));
 });
 
 adminRouter.delete('/plans/:id', async (req, res) => {
-  const id = Number(req.params.id);
+  const id = idParam(req);
   const used = (await get<{ n: number }>(
     'SELECT (SELECT COUNT(*) FROM subscriptions WHERE plan_id = ?) + (SELECT COUNT(*) FROM invoices WHERE plan_id = ?) AS n',
     [id, id],
@@ -279,17 +291,17 @@ adminRouter.post('/invoices', async (req, res) => {
 });
 
 adminRouter.post('/invoices/:id/refresh', async (req, res) => {
-  res.json(await syncInvoice(await findInvoice(Number(req.params.id))));
+  res.json(await syncInvoice(await findInvoice(idParam(req))));
 });
 
 adminRouter.post('/invoices/:id/cancel', async (req, res) => {
-  await cancelInvoice(await findInvoice(Number(req.params.id)));
+  await cancelInvoice(await findInvoice(idParam(req)));
   res.status(204).end();
 });
 
 // Baixa manual (ex.: pagamento recebido fora da Cora).
 adminRouter.post('/invoices/:id/mark-paid', async (req, res) => {
-  const inv = await findInvoice(Number(req.params.id));
+  const inv = await findInvoice(idParam(req));
   await run('UPDATE invoices SET manual = 1 WHERE id = ?', [inv.id]);
   await applyPayment(inv);
   res.json(await findInvoice(inv.id));
@@ -297,7 +309,7 @@ adminRouter.post('/invoices/:id/mark-paid', async (req, res) => {
 
 // Simula o pagamento no ambiente Stage da Cora (apenas testes).
 adminRouter.post('/invoices/:id/stage-pay', async (req, res) => {
-  const inv = await findInvoice(Number(req.params.id));
+  const inv = await findInvoice(idParam(req));
   if (getCoraConfig().environment !== 'stage') throw new HttpError(400, 'Disponível apenas no ambiente Stage');
   if (!inv.cora_id) throw new HttpError(400, 'Fatura sem identificador Cora');
   await cora.payInvoiceStage(inv.cora_id);

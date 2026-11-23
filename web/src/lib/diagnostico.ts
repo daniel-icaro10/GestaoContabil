@@ -2,6 +2,7 @@ import { money, pct } from './format';
 import {
   baseCreditos,
   fatorR,
+  usaFatorR,
   menorCarga,
   resultadoOperacional,
   resumoRegimes,
@@ -27,12 +28,13 @@ export function montarDiagnostico(d: CompanyData, r: Resultados, cfg: TaxConfig)
   const creditos = baseCreditos(d.creditos);
   const t = d.empresa;
   const anexoIII = fr >= cfg.fatorRLimite;
+  const comFatorR = usaFatorR(t.tipoAtividade);
 
   const indicadores = [
     { label: 'Faturamento anual', value: money(receita), sub: `Média: ${money(receita / 12)}/mês` },
     { label: 'Margem operacional', value: pct(res.margem * 100), sub: money(res.resultado) },
     { label: 'Folha / faturamento', value: pct(folhaRatio * 100), sub: money(folha) },
-    { label: 'Fator R', value: pct(fr * 100), sub: anexoIII ? 'Anexo III' : 'Anexo V' },
+    { label: 'Fator R', value: pct(fr * 100), sub: !comFatorR ? 'Não se aplica à atividade' : anexoIII ? 'Anexo III' : 'Anexo V' },
     { label: 'Total de custos', value: money(res.totalCustos), sub: pct(receita > 0 ? (res.totalCustos / receita) * 100 : 0) },
     { label: 'Total de despesas', value: money(res.totalDespesas), sub: pct(receita > 0 ? (res.totalDespesas / receita) * 100 : 0) },
     { label: 'Base de créditos', value: money(creditos), sub: 'PIS/COFINS anual' },
@@ -42,7 +44,8 @@ export function montarDiagnostico(d: CompanyData, r: Resultados, cfg: TaxConfig)
   const conclusoes = [
     `A empresa apresenta margem operacional estimada de ${pct(res.margem * 100)}.`,
     `A folha de pagamento representa ${pct(folhaRatio * 100)} do faturamento anual.`,
-    `O Fator R calculado foi de ${pct(fr * 100)}, ${anexoIII ? 'favorecendo o enquadramento no Anexo III do Simples Nacional' : 'indicando enquadramento no Anexo V para atividades de serviço'}.`,
+    comFatorR &&
+      `O Fator R calculado foi de ${pct(fr * 100)}, ${anexoIII ? 'favorecendo o enquadramento no Anexo III do Simples Nacional' : 'indicando enquadramento no Anexo V para atividades de serviço'}.`,
     res.totalDespesas > 0 &&
       `O volume de despesas dedutíveis (${money(res.totalDespesas)}) pode ter impacto relevante na apuração do Lucro Real.`,
     creditos > 0 &&
@@ -57,7 +60,7 @@ export function montarDiagnostico(d: CompanyData, r: Resultados, cfg: TaxConfig)
     pontos.push({ tipo: 'alerta', texto: `Faturamento acima do limite do Simples Nacional (${money(cfg.simplesLimite)}). A empresa não pode optar pelo Simples e ele foi desconsiderado na recomendação.` });
   else if (receita > cfg.simplesLimite * 0.9)
     pontos.push({ tipo: 'alerta', texto: `Faturamento próximo ao limite do Simples Nacional (${money(cfg.simplesLimite)}). Planejamento preventivo é recomendado.` });
-  if (!anexoIII && (t.tipoAtividade === 'Serviços' || t.tipoAtividade === 'Atividades Mistas'))
+  if (!anexoIII && comFatorR)
     pontos.push({ tipo: 'alerta', texto: `Fator R abaixo de 28% (${pct(fr * 100)}). Empresa de serviços será enquadrada no Anexo V, com alíquotas mais elevadas.` });
   if (res.margem < 0.05)
     pontos.push({ tipo: 'alerta', texto: `Margem operacional reduzida (${pct(res.margem * 100)}). Avaliar viabilidade do Lucro Real com base no resultado efetivo.` });

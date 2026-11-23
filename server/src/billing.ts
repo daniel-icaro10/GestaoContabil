@@ -162,9 +162,9 @@ async function emitInvoice(userId: number, planId: number, opts: { dueDate?: str
   if (!sub) {
     await run('INSERT INTO subscriptions (user_id, plan_id, status) VALUES (?, ?, ?)', [userId, planId, 'pending']);
     sub = (await getSubscription(userId))!;
-  } else if (sub.plan_id !== planId) {
-    await run(`UPDATE subscriptions SET plan_id = ?, updated_at = now() WHERE id = ?`, [planId, sub.id]);
   }
+  // Troca de plano: a assinatura só passa para o plano novo quando a fatura for paga (em applyPayment).
+  // Mudar aqui liberaria os módulos do plano novo antes do pagamento.
 
   // Cancela faturas em aberto anteriores (ex.: troca de plano) para não haver duas cobranças.
   for (const old of await all<Invoice>(
@@ -221,10 +221,11 @@ export async function applyPayment(invoice: Invoice, paidAt = new Date().toISOSt
     const currentEnd = sub.current_period_end ? new Date(sub.current_period_end) : null;
     const base = currentEnd && currentEnd > now ? currentEnd : now;
     const newEnd = addMonths(base, fresh.period_months || 1);
-    await c.run(`UPDATE subscriptions SET status = 'active', current_period_end = ?, updated_at = now() WHERE id = ?`, [
-      newEnd.toISOString(),
-      sub.id,
-    ]);
+    await c.run(
+      `UPDATE subscriptions SET status = 'active', plan_id = COALESCE(?, plan_id), current_period_end = ?, updated_at = now()
+       WHERE id = ?`,
+      [fresh.plan_id, newEnd.toISOString(), sub.id],
+    );
     await c.run(
       `UPDATE invoices SET status = 'PAID', applied = 1, paid_at = COALESCE(paid_at, ?), updated_at = now() WHERE id = ?`,
       [paidAt, fresh.id],

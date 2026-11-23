@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowRight, CheckCircle2, DollarSign, Info, Target, Tren
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { MESES_CURTOS, kfmt, money, pct } from '../lib/format';
-import { fatorR, mediaMensal, menorCarga, resultadoOperacional, resumoRegimes, receitaAnual, soma, totalFolha } from '../lib/tax';
+import { fatorR, mediaMensal, menorCarga, resultadoOperacional, resumoRegimes, receitaAnual, soma, totalFolha, usaFatorR } from '../lib/tax';
 import { Card, CardTitle, ChartTooltip, Disclaimer, KV, Stat, axisTick, gridStroke, clsx } from '../components/ui';
 
 export default function Dashboard() {
@@ -32,7 +32,7 @@ export default function Dashboard() {
   const trendFat = h1 > 0 ? ((h2 - h1) / h1) * 100 : undefined;
 
   const alertas = [
-    fr < taxConfig.fatorRLimite && {
+    usaFatorR(c.tipoAtividade) && fr < taxConfig.fatorRLimite && {
       tone: 'warn',
       text: 'Fator R abaixo de 28% — enquadramento no Anexo V para atividades de serviço.',
     },

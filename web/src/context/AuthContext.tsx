@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { api, onApiStatus, setToken, getToken } from '../lib/api';
+import { api, ApiError, onApiStatus, setToken, getToken } from '../lib/api';
 import type { ModuleId, PageId } from '../lib/pages';
 
 export interface SessionUser {
@@ -37,7 +37,7 @@ interface AuthCtx {
   register(data: { name: string; email: string; password: string; document?: string }): Promise<void>;
   setup(data: { name: string; email: string; password: string }): Promise<void>;
   logout(): void;
-  refresh(): Promise<void>;
+  refresh(): Promise<boolean>;
   setSession(s: Session): void;
   can(page: PageId): boolean;
   isAdmin: boolean;
@@ -49,21 +49,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refresh = useCallback(async () => {
+  /** Recarrega a sessão. Devolve false quando a falha foi temporária (rede/servidor) e vale tentar de novo. */
+  const refresh = useCallback(async (): Promise<boolean> => {
     if (!getToken()) {
       setSession(null);
-      return;
+      return true;
     }
     try {
       setSession(await api<Session>('/auth/me'));
-    } catch {
-      setToken(null);
-      setSession(null);
+      return true;
+    } catch (e) {
+      // Só descarta o token quando o servidor recusa a sessão. Falha de rede ou servidor reiniciando
+      // (500/502/503) não pode deslogar o usuário: o token continua válido e a próxima tentativa recupera.
+      if (e instanceof ApiError && e.status === 401) {
+        setToken(null);
+        setSession(null);
+        return true;
+      }
+      return false;
     }
   }, []);
 
   useEffect(() => {
-    refresh().finally(() => setLoading(false));
+    (async () => {
+      // Na abertura do app, insiste algumas vezes (ex.: servidor reiniciando durante um deploy).
+      for (let i = 0; i < 4 && !(await refresh()); i++) await new Promise((r) => setTimeout(r, 2000));
+    })().finally(() => setLoading(false));
   }, [refresh]);
 
   useEffect(

@@ -4,6 +4,10 @@ import { z } from 'zod';
 import { all, get, insert, run } from '../db.js';
 import {
   HttpError,
+  checkLoginLimit,
+  clearLoginFailures,
+  idParam,
+  registerLoginFailure,
   publicUser,
   requireAuth,
   requireModule,
@@ -100,10 +104,13 @@ appRouter.post('/auth/register', async (req, res) => {
 
 appRouter.post('/auth/login', async (req, res) => {
   const body = z.object({ email, password: z.string().min(1) }).parse(req.body);
+  checkLoginLimit(body.email);
   const user = await get<UserRow>('SELECT * FROM users WHERE email = ?', [body.email]);
   if (!user || !bcrypt.compareSync(body.password, user.password_hash)) {
+    registerLoginFailure(body.email);
     throw new HttpError(401, 'E-mail ou senha incorretos');
   }
+  clearLoginFailures(body.email);
   if (!user.active) throw new HttpError(403, 'Usuário desativado. Contate o administrador.');
   res.json({ token: signToken(user), ...(await sessionPayload(user)) });
 });
@@ -181,7 +188,7 @@ appRouter.post('/companies', requireAuth, requireSubscription, anyModule, async 
 });
 
 appRouter.put('/companies/:id', requireAuth, requireSubscription, requireModule('principal', 'dados-financeiros'), async (req, res) => {
-  const id = Number(req.params.id);
+  const id = idParam(req);
   await ownCompany(req.user!.id, id);
   const data = companyData.parse(req.body);
   await run(`UPDATE companies SET data = ?, updated_at = now() WHERE id = ?`, [JSON.stringify(data), id]);
@@ -189,7 +196,7 @@ appRouter.put('/companies/:id', requireAuth, requireSubscription, requireModule(
 });
 
 appRouter.delete('/companies/:id', requireAuth, requireSubscription, requireModule('principal'), async (req, res) => {
-  const id = Number(req.params.id);
+  const id = idParam(req);
   await ownCompany(req.user!.id, id);
   await run('DELETE FROM companies WHERE id = ?', [id]);
   if (req.user!.current_company_id === id) await run('UPDATE users SET current_company_id = NULL WHERE id = ?', [req.user!.id]);
@@ -197,7 +204,7 @@ appRouter.delete('/companies/:id', requireAuth, requireSubscription, requireModu
 });
 
 appRouter.put('/companies/:id/select', requireAuth, requireSubscription, anyModule, async (req, res) => {
-  const id = Number(req.params.id);
+  const id = idParam(req);
   await ownCompany(req.user!.id, id);
   await run('UPDATE users SET current_company_id = ? WHERE id = ?', [id, req.user!.id]);
   res.status(204).end();
@@ -259,12 +266,12 @@ async function ownInvoice(userId: number, id: number) {
 }
 
 appRouter.post('/billing/invoices/:id/refresh', requireAuth, async (req, res) => {
-  const inv = await ownInvoice(req.user!.id, Number(req.params.id));
+  const inv = await ownInvoice(req.user!.id, idParam(req));
   res.json(await syncInvoice(inv));
 });
 
 appRouter.post('/billing/invoices/:id/cancel', requireAuth, async (req, res) => {
-  const inv = await ownInvoice(req.user!.id, Number(req.params.id));
+  const inv = await ownInvoice(req.user!.id, idParam(req));
   await cancelInvoice(inv);
   res.status(204).end();
 });

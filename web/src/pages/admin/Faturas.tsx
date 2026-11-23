@@ -44,25 +44,32 @@ export default function Faturas() {
     api<{ environment: 'stage' | 'production' }>('/admin/cora').then((c) => setEnv(c.environment)).catch(() => undefined);
   }, []);
 
-  const act = async (key: string, fn: () => Promise<unknown>, msg: string) => {
+  /** Executa a ação e devolve true se deu certo (o erro já é mostrado em toast). */
+  const act = async (key: string, fn: () => Promise<unknown>, msg: string): Promise<boolean> => {
     setBusy(key);
     try {
       await fn();
       await load();
       toast(msg);
+      return true;
     } catch (e: any) {
       toast(e.message, 'danger');
+      return false;
     } finally {
       setBusy(null);
     }
   };
 
   const openIssue = async () => {
-    const [u, p] = await Promise.all([api<UserOpt[]>('/admin/users'), api<PlanOpt[]>('/admin/plans')]);
-    const clients = u.filter((x) => x.role !== 'admin');
-    setUsers(clients);
-    setPlans(p);
-    setIssue({ userId: clients[0]?.id ?? 0, planId: p[0]?.id ?? 0 });
+    try {
+      const [u, p] = await Promise.all([api<UserOpt[]>('/admin/users'), api<PlanOpt[]>('/admin/plans')]);
+      const clients = u.filter((x) => x.role !== 'admin');
+      setUsers(clients);
+      setPlans(p);
+      setIssue({ userId: clients[0]?.id ?? 0, planId: p[0]?.id ?? 0 });
+    } catch (e: any) {
+      toast(e.message, 'danger');
+    }
   };
 
   if (!rows) return <Spinner />;
@@ -216,8 +223,8 @@ export default function Faturas() {
               loading={busy === 'issue'}
               disabled={!issue?.userId || !issue?.planId}
               onClick={async () => {
-                await act('issue', () => api('/admin/invoices', { body: issue }), 'Cobrança emitida.');
-                setIssue(null);
+                const ok = await act('issue', () => api('/admin/invoices', { body: issue }), 'Cobrança emitida.');
+                if (ok) setIssue(null);
               }}
             >
               Emitir

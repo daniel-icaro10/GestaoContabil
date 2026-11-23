@@ -35,7 +35,10 @@ export const onApiStatus = (fn: Listener) => {
   };
 };
 
-export async function api<T = any>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
+export async function api<T = any>(
+  path: string,
+  opts: { method?: string; body?: unknown; keepalive?: boolean } = {},
+): Promise<T> {
   const token = getToken();
   const res = await fetch(`/api${path}`, {
     method: opts.method ?? (opts.body !== undefined ? 'POST' : 'GET'),
@@ -44,6 +47,8 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    // keepalive: a requisição continua mesmo se a aba for fechada (usado no salvamento ao sair).
+    keepalive: opts.keepalive,
   });
   if (res.status === 401 || res.status === 402) listeners.forEach((l) => l(res.status));
   if (res.status === 204) return undefined as T;

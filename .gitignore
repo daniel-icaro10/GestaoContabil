@@ -4,3 +4,4 @@ server/data/
 .env
 *.log
 .env.vps
+backups/

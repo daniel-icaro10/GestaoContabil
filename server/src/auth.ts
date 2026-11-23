@@ -117,3 +117,34 @@ export async function requireSubscription(req: Request, _res: Response, next: Ne
   }
   next();
 }
+
+/** Lê o :id da rota como inteiro positivo (404 para valores inválidos, em vez de erro no banco). */
+export function idParam(req: Request): number {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0 || id > 2_147_483_647) throw new HttpError(404, 'Registro não encontrado');
+  return id;
+}
+
+// Limite de tentativas de login por e-mail (memória do processo): 10 erros em 15 minutos bloqueiam.
+const LOGIN_WINDOW = 15 * 60_000;
+const LOGIN_MAX = 10;
+const loginFails = new Map<string, { n: number; until: number }>();
+
+export function checkLoginLimit(key: string) {
+  const f = loginFails.get(key);
+  if (f && f.until > Date.now() && f.n >= LOGIN_MAX) {
+    throw new HttpError(429, 'Muitas tentativas de login. Aguarde alguns minutos e tente novamente.');
+  }
+}
+
+export function registerLoginFailure(key: string) {
+  const now = Date.now();
+  const f = loginFails.get(key);
+  if (!f || f.until <= now) loginFails.set(key, { n: 1, until: now + LOGIN_WINDOW });
+  else f.n++;
+  if (loginFails.size > 10_000) for (const [k, v] of loginFails) if (v.until <= now) loginFails.delete(k);
+}
+
+export function clearLoginFailures(key: string) {
+  loginFails.delete(key);
+}
